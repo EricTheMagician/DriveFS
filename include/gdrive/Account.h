@@ -5,6 +5,7 @@
 #pragma once
 #include "gdrive/Account.h"
 #include "gdrive/File.h"
+#include <string_view>
 #include <cpprest/http_client.h>
 #include "BaseAccount.h"
 #include <boost/filesystem.hpp>
@@ -29,38 +30,29 @@ using bsoncxx::builder::stream::finalize;
 using bsoncxx::builder::stream::open_array;
 using bsoncxx::builder::stream::open_document;
 using bsoncxx::builder::basic::kvp;
-
+#define GDRIVE_OAUTH_SCOPE "https://www.googleapis.com/auth/drive"
 
 namespace DriveFS {
     class Account: public BaseAccount {
     public:
-        Account(): BaseAccount(
-                "https://www.googleapis.com/drive/v3/",
-                "126857315828-tj5cie9scsk0b5edmakl266p7pis80ts.apps.googleusercontent.com",
-                "wxvtZ_SZpmEKXSB0kITXYx6C",
-                "https://accounts.google.com/o/oauth2/v2/auth",
-                "https://www.googleapis.com/oauth2/v4/token",
-                "http://localhost:7878",
-                "https://www.googleapis.com/auth/drive"){
-            m_http_config.set_oauth2(m_oauth2_config) ;
-        }
+        Account();
 
-        Account(std::string access_tokoen, std::string refresh_token);
+        Account(const std::string &access_tokoen, const std::string &refresh_token);
 
         static Account getAccount();
     protected:
         void run_internal() override;
         void loadFilesAndFolders() override;
-        void getFilesAndFolders();
+        void getFilesAndFolders(std::string nextPageToken="", int backoff=0);
     private:
+        void getTeamDrives(int backoff=0);
+        void linkParentsAndChildren();
 //        oauth2_config m_oauth2_config;
 //        http_client_config m_http_config;
 //        http_client m_api = http_client("https://gooleapis.com/drive/v3", m_http_config);
 
-        std::string m_last_page_token="";
+        std::string m_newStartPageToken="";
         std::atomic<ino_t> inode_count = 1;
-        std::map<ino_t, std::shared_ptr<DriveFile>> inodeToFile;
-        std::map<std::string, std::shared_ptr<DriveFile>> idToFile;
 
     };
 };

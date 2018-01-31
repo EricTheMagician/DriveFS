@@ -17,7 +17,7 @@ int main() {
 
     defaultConf.setGlobally(
 //            el::ConfigurationType::Format, "%datetime [%levshort] %thread [%fbase:%line] %msg");
-            el::ConfigurationType::Format, "%datetime [%levshort] [%fbase:%line %msg");
+            el::ConfigurationType::Format, "%datetime [%levshort] [%fbase:%line] %msg");
     defaultConf.parseFromText("*GLOBAL:\nTO_FILE = true\nFilename = \"/tmp/DriveFS.log\"\nMax_Log_File_Size = 104857600"); // 100MB rorate log sizes
     el::Loggers::reconfigureAllLoggers(defaultConf);
     el::Loggers::reconfigureLogger("default", defaultConf);

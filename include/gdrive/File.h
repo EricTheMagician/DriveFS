@@ -10,20 +10,34 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <bsoncxx/builder/basic/document.hpp>
+#include <bsoncxx/document/value.hpp>
 
 namespace DriveFS {
 
-    class _File;
-    typedef std::shared_ptr<_File> DriveFile;
-    class _File : ::File{
+    class _Object;
+    typedef std::shared_ptr<_Object> GDriveObject;
+    class _Object : public ::File{
 
-        static std::map<std::string_view, DriveFile> idToFile;
-
+    public:
+        static GDriveObject buildRoot(bsoncxx::document::view document);
+        _Object();
+        _Object(ino_t ino, bsoncxx::document::view document);
+    public:
+        static std::map<ino_t, GDriveObject> inodeToObject;
+        static std::map<std::string, GDriveObject> idToObject;
+        inline std::string getName() const{return m_name;}
+        inline std::string getId() const{return m_id;}
+        inline void addParent(GDriveObject parent){addRelationship(std::move(parent), parents);};
+        inline void addChild(GDriveObject child){addRelationship(std::move(child), children);};
     private:
-        std::vector<DriveFile> parents;
+        void addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship);
+        std::vector<GDriveObject> parents, children;
+        std::string m_name;
         bool trashed, starred;
-        std::string_view id, mime_type, selflink,title, md5Checksum;
+        std::string m_id, mime_type, selflink, md5Checksum;
         uint_fast64_t version;
+        bool isFolder, isTrashable, canRename;
 
     };
 
