@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 class File{
 
-protected:
+public:
     struct stat attribute;
 };
 

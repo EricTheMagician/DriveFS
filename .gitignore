@@ -33,4 +33,5 @@
 
 # clion and jetbrains folders
 .idea
+build
 cmake-build-debug/

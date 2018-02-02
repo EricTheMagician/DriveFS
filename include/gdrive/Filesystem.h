@@ -3,11 +3,11 @@
 //
 
 #pragma once
+#include "BaseFileSystem.h"
+#include "Account.h"
 
+namespace DriveFS {
 
-class Filesystem {
+    struct fuse_lowlevel_ops getOps();
 
-};
-
-
-
+}

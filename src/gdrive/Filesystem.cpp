@@ -3,3 +3,211 @@
 //
 
 #include "gdrive/Filesystem.h"
+#include "gdrive/Account.h"
+#include "gdrive/File.h"
+#include "FolderIO.h"
+
+namespace DriveFS{
+
+
+    inline Account* getAccount(const fuse_req_t &req){
+        return static_cast<Account *>(fuse_req_userdata(req));
+    }
+
+    GDriveObject getObjectFromInodeAndReq(fuse_req_t req, ino_t inode){
+
+        auto inodeToObject = &DriveFS::_Object::inodeToObject;
+        const auto cursor = inodeToObject->find(inode);
+
+        if(cursor == inodeToObject->cend()){
+            //object not found
+            return nullptr;
+        }
+
+        return cursor->second;
+
+    }
+
+    void lookup(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
+        SFAsync([=] {
+            GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
+            for (auto child: parent->children) {
+                if (child->m_name.compare(name) == 0) {
+                    struct fuse_entry_param e;
+                    memset(&e, 0, sizeof(e));
+                    e.attr = child->attribute;
+                    e.ino = e.attr.st_ino;
+                    e.attr_timeout = 18000.0;
+                    e.entry_timeout = 18000.0;
+                    child->lookupCount.fetch_add(1, std::memory_order_relaxed);
+                    fuse_reply_entry(req, &e);
+                    return;
+                }
+            }
+            fuse_reply_err(req, ENOENT);
+        });
+    }
+
+    void forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup){
+        auto shared_object = getObjectFromInodeAndReq(req, ino);
+        if(auto object = shared_object.get()){
+            uint64_t current = object->lookupCount.fetch_sub(nlookup, std::memory_order_acquire)-nlookup;
+            if(current == 0){
+                ino_t self = object->attribute.st_ino;
+                for(const GDriveObject &parent: object->parents){
+                    auto children = &(parent->children);
+                    auto it = std::find(children->begin(), children->end(), shared_object);
+                    if(it != children->end()) {
+                        parent->children.erase(it);
+                    }
+                }
+            }
+
+        }
+
+        fuse_reply_none(req);
+
+    }
+
+    void getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
+        GDriveObject object(getObjectFromInodeAndReq(req, ino));
+        if(object){
+            fuse_reply_attr(req, &(object->attribute), 180.0);
+            return;
+        }
+        fuse_reply_err(req, -ENOENT);
+
+    }
+
+    void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi);
+
+    void readlink(fuse_req_t req, fuse_ino_t ino);
+
+    void mknod(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev_t rdev);
+
+    void mkdir(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode);
+
+    void unlink(fuse_req_t req, fuse_ino_t parent, const char *name);
+
+    void rmdir(fuse_req_t req, fuse_ino_t parent, const char *name);
+
+    void symlink(fuse_req_t req, const char *link, fuse_ino_t parent, const char *name);
+
+    void rename(fuse_req_t req, fuse_ino_t parent, const char *name, fuse_ino_t newparent, const char *newname, unsigned int flags);
+
+    void link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname);
+
+    void open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi);
+
+    void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi);
+
+    void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi);
+
+    void flush(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi);
+
+    void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi);
+
+    void fsync(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
+
+    void opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
+        SFAsync([=] {
+            GDriveObject object = getObjectFromInodeAndReq(req, ino);
+            FolderIO *io = new FolderIO(req, object->children.size());
+            for (auto child: object->children) {
+                io->addDirEntry(child->m_name.c_str(), child->attribute);
+            }
+            io->done();
+            fi->fh = (uintptr_t) io;
+
+
+            fuse_reply_open(req, fi);
+        });
+    }
+
+    void readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
+        FolderIO *io = (FolderIO*)(fi->fh);
+        if(io!= nullptr) {
+            reply_buf_limited(req, io->buffer->data(), io->accumulated_size,off,size);
+        }else{
+            fuse_reply_err(req, -EIO);
+        }
+    }
+
+    void releasedir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
+        FolderIO *io = (FolderIO *) fi->fh;
+        delete io;
+        fuse_reply_err(req, 0);
+    }
+
+    void fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
+
+    void statfs(fuse_req_t req, fuse_ino_t ino){
+        struct statvfs stat{
+            .f_bsize = 65536,
+            .f_frsize=  65536,
+            .f_blocks=  1000000,
+            .f_bfree=  1000000,
+            .f_bavail=  1000000,
+            .f_files=  1000000,
+            .f_ffree=  1000000,
+            .f_favail=  1000000,
+            .f_fsid=  1000000,
+            .f_flag=  0,
+        };
+        fuse_reply_statfs(req, &stat);
+    }
+
+    void setxattr(fuse_req_t req, fuse_ino_t ino, const char *name, const char *value, size_t size, int flags);
+
+    void getxattr(fuse_req_t req, fuse_ino_t ino, const char *name, size_t size);
+
+    void listxattr(fuse_req_t req, fuse_ino_t ino, size_t size);
+
+    void removexattr(fuse_req_t req, fuse_ino_t ino, const char *name);
+
+    void access(fuse_req_t req, fuse_ino_t ino, int mask){
+        fuse_reply_err(req, 0);
+    }
+
+    void create(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, struct fuse_file_info *fi);
+
+    void getlk(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, struct flock *lock);
+
+    void setlk(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, struct flock *lock, int sleep);
+
+    void bmap(fuse_req_t req, fuse_ino_t ino, size_t blocksize, uint64_t idx);
+
+    void ioctl(fuse_req_t req, fuse_ino_t ino, int cmd, void *arg, struct fuse_file_info *fi, unsigned flags, const void *in_buf, size_t in_bufsz, size_t out_bufsz);
+
+    void poll(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, struct fuse_pollhandle *ph);
+
+    void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi);
+
+    void retrieve_reply(fuse_req_t req, void *cookie, fuse_ino_t ino, off_t offset, struct fuse_bufvec *bufv);
+
+    void forget_multi(fuse_req_t req, size_t count, struct fuse_forget_data *forgets);
+
+    void flock(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, int op);
+
+    void fallocate(fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t length, struct fuse_file_info *fi);
+
+    void readdirplus(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
+
+    }
+
+    fuse_lowlevel_ops getOps(){
+        fuse_lowlevel_ops ops;
+        ops.lookup = lookup;
+        ops.getattr = getattr;
+        ops.forget = forget;
+        ops.opendir = opendir;
+//        ops.readdirplus = readdirplus;
+        ops.readdir = readdir;
+        ops.releasedir = releasedir;
+        ops.access = access;
+        ops.statfs = statfs;
+
+        return ops;
+    }
+
+}
