@@ -2,7 +2,7 @@
 // Created by eric on 27/01/18.
 //
 
-#include "gdrive/File.h"
+#include <gdrive/File.h>
 #include "adaptive_time_parser.h"
 #include "date.h"
 #include <ctime>
@@ -17,7 +17,7 @@ struct timespec getTimeFromRFC3339String(const std::string &str_date){
     date::sys_time<std::chrono::milliseconds> tp;
     std::stringstream ss( str_date );
     ss >> date::parse("%FT%TZ", tp);
-    uint64_t epoch = tp.time_since_epoch().count();
+    int64_t epoch = tp.time_since_epoch().count();
     return {epoch/1000, epoch % 1000};
 
 }
@@ -134,6 +134,65 @@ namespace DriveFS{
 
         return sf;
     }
+
+    GDriveObject _Object::buildTeamDriveHolder(ino_t ino, GDriveObject root){
+        _Object f;
+
+        f.attribute.st_ino = ino;
+        f.attribute.st_size = 0;
+        struct timespec now{time(nullptr),0};
+        f.attribute.st_atim = now;
+        f.attribute.st_mtim = now;
+        f.attribute.st_ctim = now;
+        f.attribute.st_mode = S_IFDIR | 0x777;//S_IRWXU | S_IRWXG | S_IRWXO;
+        f.attribute.st_nlink = 1;
+        f.attribute.st_uid = 65534; // nobody
+        f.attribute.st_gid = 65534;
+
+
+        f.isFolder = true;
+        std::string id("teamDriveHolder");
+        f.m_id = id;
+        f.m_name = "Team Drives";
+        auto sf = std::make_shared<_Object>(f);
+        _Object::idToObject[id] = sf;
+        _Object::inodeToObject[ino] = sf;
+        sf->addParent(root);
+        root->addChild(sf);
+
+        return sf;
+    }
+
+    GDriveObject _Object::buildTeamDrive(ino_t ino, bsoncxx::document::view document, GDriveObject parent){
+        _Object f;
+
+        f.attribute.st_ino = ino;
+        f.attribute.st_size = 0;
+        struct timespec now{time(nullptr),0};
+        f.attribute.st_atim = now;
+        f.attribute.st_mtim = now;
+        f.attribute.st_ctim = now;
+        f.attribute.st_mode = S_IFDIR | 0x777;//S_IRWXU | S_IRWXG | S_IRWXO;
+        f.attribute.st_nlink = 1;
+        f.attribute.st_uid = 65534; // nobody
+        f.attribute.st_gid = 65534;
+        f.m_name = document["name"].get_utf8().value.to_string();
+
+        f.isFolder = true;
+        std::string id(document["id"].get_utf8().value.to_string());
+        f.m_id = id;
+        auto sf = std::make_shared<_Object>(f);
+        _Object::idToObject[id] = sf;
+        _Object::inodeToObject[ino] = sf;
+
+        sf->addParent(parent);
+        parent->addChild(sf);
+
+        return sf;
+    }
+
+
+
 
     void _Object::addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship){
         if( std::find(relationship.begin(), relationship.end(), other) == relationship.end() ){

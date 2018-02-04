@@ -145,8 +145,9 @@ namespace DriveFS {
                                                 << "parents"
                                                 << open_document << "$exists" << 0
                                                 << close_document << finalize);
+        GDriveObject root;
         if (maybeRoot) {
-            DriveFS::_Object::buildRoot(*maybeRoot);
+            root = DriveFS::_Object::buildRoot(*maybeRoot);
         }
 
         auto cursor = db.find(document{} << "parents" << open_document << "$exists" << 1 << close_document << finalize);
@@ -214,6 +215,16 @@ namespace DriveFS {
 //            if(needs_updating) {
 //                db.bulk_write(documents);
 //            }
+
+        cursor = client[DATABASEDATA].find( document{} << "kind" << "drive#teamDrive" << finalize);
+        if(cursor.begin() != cursor.end()){
+            auto inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
+            auto team_drive = _Object::buildTeamDriveHolder(inode, root);
+            for(auto doc: cursor){
+                inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
+                _Object::buildTeamDrive(inode, doc, team_drive);
+            }
+        }
 
         LOG(TRACE) << "idToObject has " << DriveFS::_Object::idToObject.size() << " items.";
         LOG(TRACE) << "inodeToObject has " << DriveFS::_Object::inodeToObject.size() << " items.";
@@ -407,7 +418,7 @@ namespace DriveFS {
         }
 
 
-        auto eleChanges = value["teamdrives"];
+        auto eleChanges = value["teamDrives"];
         auto toDelete = bsoncxx::builder::basic::array{};
 
         if (eleChanges) {

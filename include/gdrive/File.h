@@ -30,6 +30,8 @@ namespace DriveFS {
     public:
         static std::map<ino_t, GDriveObject> inodeToObject;
         static std::map<std::string, GDriveObject> idToObject;
+        static GDriveObject buildTeamDriveHolder(ino_t ino, GDriveObject root);
+        static GDriveObject buildTeamDrive(ino_t ino, bsoncxx::document::view document, GDriveObject parent);
         inline std::string getName() const{return m_name;}
         inline std::string getId() const{return m_id;}
         inline void addParent(GDriveObject parent){addRelationship(std::move(parent), parents);};
@@ -40,7 +42,7 @@ namespace DriveFS {
         std::vector<GDriveObject> parents, children;
         std::string m_name;
 
-    private:
+    protected:
         void addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship);
         bool trashed, starred;
         std::string m_id, mime_type, selflink, md5Checksum;
