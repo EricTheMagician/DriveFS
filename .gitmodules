@@ -1,0 +1,3 @@
+[submodule "external/cpp11-on-multicore"]
+	path = external/semaphore
+	url = https://github.com/preshing/cpp11-on-multicore
