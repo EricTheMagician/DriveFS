@@ -4,6 +4,11 @@ project(DriveFS CXX)
 set(CMAKE_CXX_STANDARD 17)
 
 add_executable(DriveFS
+        # semaphore
+        external/semaphore/common/autoresetevent.h
+        external/semaphore/common/sema.h
+
+        # my files
         /usr/include/easylogging++.cc
         /usr/include/easylogging++.h
         src/main.cpp
@@ -23,7 +28,11 @@ add_executable(DriveFS
         src/BaseFileSystem.cpp
         ./include/BaseFileSystem.h
         src/FolderIO.cpp
-        ./include/FolderIO.h)
+        ./include/FolderIO.h src/gdrive/FileIO.cpp
+        ./include/gdrive/FileIO.h
+        ./include/DownloadBuffer.h
+
+        src/DownloadBuffer.cpp)
 
 target_compile_definitions(${PROJECT_NAME}
         PUBLIC
@@ -39,6 +48,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         ./include
         ./external
         ./external/adaptive_time_parser
+        ./external/semaphore/common
         /usr/include/openssl-1.0
         /usr/local/include/mongocxx/v_noabi
         /usr/local/include/bsoncxx/v_noabi

@@ -2,7 +2,8 @@
 // Created by eric on 27/01/18.
 //
 
-#include <gdrive/File.h>
+#include "gdrive/File.h"
+#include "gdrive/FileIO.h"
 #include "adaptive_time_parser.h"
 #include "date.h"
 #include <ctime>
@@ -25,10 +26,11 @@ struct timespec getTimeFromRFC3339String(const std::string &str_date){
 namespace DriveFS{
     std::map<ino_t, GDriveObject> _Object::inodeToObject;
     std::map<std::string, GDriveObject> _Object::idToObject;
+    PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(512*1024*1024);
 
-    _Object::_Object():lookupCount(0){
+    _Object::_Object():lookupCount(0), m_buffers(nullptr), heap_handles(nullptr), m_event(1){
     }
-    _Object::_Object(const DriveFS::_Object& that){
+    _Object::_Object(const DriveFS::_Object& that) {
         lookupCount = that.lookupCount.load(std::memory_order_acquire);
         parents = that.parents;
         children = that.children;
@@ -44,6 +46,12 @@ namespace DriveFS{
         isTrashable = that.isTrashable;
         canRename = that.canRename;
         attribute = that.attribute;
+        if (that.m_buffers != nullptr) {
+            m_buffers = new std::vector<WeakBuffer>(*(that.m_buffers));
+        }
+        if(that.heap_handles){
+            heap_handles = new std::vector<heap_handle>(*(that.heap_handles));
+        }
     }
     _Object::_Object(DriveFS::_Object&& that){
         lookupCount = that.lookupCount.load(std::memory_order_acquire);
@@ -61,10 +69,14 @@ namespace DriveFS{
         isTrashable = that.isTrashable;
         canRename = that.canRename;
         attribute = std::move(that.attribute);
+        m_buffers = that.m_buffers;
+        that.m_buffers = nullptr;
+        heap_handles = that.heap_handles;
+        that.heap_handles = nullptr;
 
     }
 
-    _Object::_Object(ino_t ino, bsoncxx::document::view document):lookupCount(0){
+    _Object::_Object(ino_t ino, bsoncxx::document::view document):m_event(1),lookupCount(0), m_buffers(nullptr), heap_handles(nullptr){
         attribute.st_ino = ino;
         m_id = document["id"].get_utf8().value.to_string();
 
@@ -87,6 +99,8 @@ namespace DriveFS{
                     attribute.st_size = 0;
                 }
             }
+            createVectorsForBuffers();
+
         }
 
         auto maybeCapabilities = document["capabilities"];
@@ -192,12 +206,39 @@ namespace DriveFS{
     }
 
 
-
-
     void _Object::addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship){
         if( std::find(relationship.begin(), relationship.end(), other) == relationship.end() ){
             relationship.emplace_back(other);
         }
+    }
+
+    void _Object::updateInode(ino_t ino, bsoncxx::document::view document) {
+
+    }
+
+    _Object::~_Object(){
+        if(m_buffers != nullptr){
+            delete m_buffers;
+        }
+
+        if(heap_handles != nullptr){
+            delete heap_handles;
+        }
+    }
+
+    void _Object::createVectorsForBuffers(){
+        auto size = getFileSize();
+        if(m_buffers != nullptr){
+            delete m_buffers;
+        }
+        auto nChunks = size/FileIO::write_buffer_size + 1;
+        m_buffers = new std::vector<WeakBuffer>(nChunks);
+        heap_handles = new std::vector<heap_handle>(nChunks);
+
+    }
+
+    void _Object::updatLastAccessToCache(uint64_t chunkNumber){
+        cache;
     }
 
 

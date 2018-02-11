@@ -2,6 +2,7 @@
 // Created by eric on 29/01/18.
 //
 
+#include <gdrive/FileIO.h>
 #include "gdrive/Filesystem.h"
 #include "gdrive/Account.h"
 #include "gdrive/File.h"
@@ -32,7 +33,7 @@ namespace DriveFS{
         SFAsync([=] {
             GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
             for (auto child: parent->children) {
-                if (child->m_name.compare(name) == 0) {
+                if (child->getName().compare(name) == 0) {
                     struct fuse_entry_param e;
                     memset(&e, 0, sizeof(e));
                     e.attr = child->attribute;
@@ -97,24 +98,55 @@ namespace DriveFS{
 
     void link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname);
 
-    void open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi);
+    void open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
+        GDriveObject object = getObjectFromInodeAndReq(req, ino);
+        if (object->getIsFolder()){
+            fuse_reply_err(req, -EISDIR);
+            return;
+        }
 
-    void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi);
+        if(fi->flags & O_WRONLY || fi->flags & O_RDWR){
+            fuse_reply_err(req, -ENOSYS);
+            return;
+        }
+        FileIO *io = new FileIO(object, fi->flags, getAccount(req));
+        fi->fh = (uintptr_t) io;
+
+        fuse_reply_open(req, fi);
+        assert(io->getIsReadable());
+        return;
+    }
+
+    void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
+        FileIO *io = (FileIO *) fi->fh;
+        auto buf = io->read(size, off);
+
+        fuse_reply_buf(req, (const char *) buf->data(), buf->size());
+        delete buf;
+    }
 
     void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi);
 
     void flush(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi);
 
-    void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi);
+    void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
+        FileIO *io = (FileIO *) fi->fh;
+        delete io;
+        fuse_reply_err(req, 0);
+    }
 
     void fsync(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
 
     void opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
         SFAsync([=] {
             GDriveObject object = getObjectFromInodeAndReq(req, ino);
+            if(! object->getIsFolder()){
+                fuse_reply_err(req, -ENOTDIR);
+                return;
+            }
             FolderIO *io = new FolderIO(req, object->children.size());
             for (auto child: object->children) {
-                io->addDirEntry(child->m_name.c_str(), child->attribute);
+                io->addDirEntry(child->getName().c_str(), child->attribute);
             }
             io->done();
             fi->fh = (uintptr_t) io;
@@ -206,6 +238,9 @@ namespace DriveFS{
         ops.releasedir = releasedir;
         ops.access = access;
         ops.statfs = statfs;
+        ops.open = open;
+        ops.read = read;
+        ops.release = release;
 
         return ops;
     }

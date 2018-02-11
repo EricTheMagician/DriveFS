@@ -116,13 +116,13 @@ namespace DriveFS {
             auto found = DriveFS::_Object::idToObject.find(child);
             printf("child %s\n", child.c_str());
             if (found != DriveFS::_Object::idToObject.end()) {
-                printf("first %2d\t%s\n", (int) found->second->attribute.st_ino, found->second->m_name.c_str());
+                printf("first %2d\t%s\n", (int) found->second->attribute.st_ino, found->second->getName().c_str());
                 bsoncxx::array::view parents = doc["parents"].get_array();
                 for (auto parentId : parents) {
                     auto found2 = DriveFS::_Object::idToObject.find(parentId.get_utf8().value.to_string());
                     printf("parent %s\n", parentId.get_utf8().value.to_string().c_str());
                     if (found2 != DriveFS::_Object::idToObject.end()) {
-                        printf("second %2d\t%s\n", (int) found2->second->attribute.st_ino, found2->second->m_name.c_str());
+                        printf("second %2d\t%s\n", (int) found2->second->attribute.st_ino, found2->second->getName().c_str());
                         found2->second->addChild(found->second);
                         found->second->addParent(found2->second);
                     }

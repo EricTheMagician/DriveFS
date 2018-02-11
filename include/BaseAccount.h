@@ -39,6 +39,9 @@ public:
     virtual ~BaseAccount();
     void run();
     inline bool needToInitialize() const {return m_needToInitialize;}
+    inline http_client getClient(){
+        return http_client(m_apiEndpoint, m_http_config);
+    }
 private:
 
     void open_browser_auth();
