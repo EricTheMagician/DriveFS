@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.9)
 project(DriveFS CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS -std=c++17)
+
+add_subdirectory(external/gdrive-cpprest-client)
 
 add_executable(DriveFS
         # semaphore
@@ -71,6 +74,8 @@ target_link_libraries(${PROJECT_NAME}
         ${LIBSSL}
         mongocxx bsoncxx
         ${LIBFUSE3_LIBRARIES}
+        stdc++fs
+        CppRestSwaggerClient
         )
 
 
