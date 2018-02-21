@@ -77,49 +77,59 @@ pplx::task<std::shared_ptr<File>> FilesApi::copy(utility::string_t fileId, utili
 
     std::unordered_set<utility::string_t> consumeHttpContentTypes;
 
-    
+    if(!alt.empty())
     {
         queryParams[U("alt")] = ApiClient::parameterToString(alt);
     }
-    
+
+    if(!fields.empty())
     {
         queryParams[U("fields")] = ApiClient::parameterToString(fields);
     }
-    
+
+    if(!key.empty())
     {
         queryParams[U("key")] = ApiClient::parameterToString(key);
     }
-    
+
+    if(!oauthToken.empty())
     {
         queryParams[U("oauth_token")] = ApiClient::parameterToString(oauthToken);
     }
-    
+
+    if(!prettyPrint)
     {
         queryParams[U("prettyPrint")] = ApiClient::parameterToString(prettyPrint);
     }
-    
+
+    if(!quotaUser.empty())
     {
         queryParams[U("quotaUser")] = ApiClient::parameterToString(quotaUser);
     }
-    
+
+    if(!userIp.empty())
     {
         queryParams[U("userIp")] = ApiClient::parameterToString(userIp);
     }
-    
+
+    if(ignoreDefaultVisibility)
     {
-        queryParams[U("ignoreDefaultVisibility")] = ApiClient::parameterToString(ignoreDefaultVisibility);
+        queryParams[U("ignoreDefaultVisibility")] = "true";
     }
-    
+
+    if(keepRevisionForever)
     {
-        queryParams[U("keepRevisionForever")] = ApiClient::parameterToString(keepRevisionForever);
+        queryParams[U("keepRevisionForever")] = "true";
     }
-    
+
+    if(!ocrLanguage.empty())
     {
         queryParams[U("ocrLanguage")] = ApiClient::parameterToString(ocrLanguage);
     }
-    
+
+    if(supportsTeamDrives)
     {
-        queryParams[U("supportsTeamDrives")] = ApiClient::parameterToString(supportsTeamDrives);
+        queryParams[U("supportsTeamDrives")] = "true";
     }
 
     std::shared_ptr<IHttpBody> httpBody;
@@ -252,55 +262,56 @@ pplx::task<std::shared_ptr<File>> FilesApi::create(utility::string_t alt, utilit
     headerParams[U("Accept")] = responseHttpContentType;
 
     std::unordered_set<utility::string_t> consumeHttpContentTypes;
-    consumeHttpContentTypes.insert( U("application/octet-stream") );
+//    consumeHttpContentTypes.insert( U("application/octet-stream") );
+//    consumeHttpContentTypes.insert( U("multipart/form-data") );
 
-    
+    if(!alt.empty())
     {
         queryParams[U("alt")] = ApiClient::parameterToString(alt);
     }
-    
+    if(!fields.empty())
     {
         queryParams[U("fields")] = ApiClient::parameterToString(fields);
     }
-    
+    if(!key.empty())
     {
         queryParams[U("key")] = ApiClient::parameterToString(key);
     }
-    
+    if(!oauthToken.empty())
     {
         queryParams[U("oauth_token")] = ApiClient::parameterToString(oauthToken);
     }
-    
+    if(prettyPrint)
     {
         queryParams[U("prettyPrint")] = ApiClient::parameterToString(prettyPrint);
     }
-    
+    if(!quotaUser.empty())
     {
         queryParams[U("quotaUser")] = ApiClient::parameterToString(quotaUser);
     }
-    
+    if(!userIp.empty())
     {
         queryParams[U("userIp")] = ApiClient::parameterToString(userIp);
     }
-    
+    if(ignoreDefaultVisibility)
     {
-        queryParams[U("ignoreDefaultVisibility")] = ApiClient::parameterToString(ignoreDefaultVisibility);
+        queryParams[U("ignoreDefaultVisibility")] = "true";
     }
-    
+    if(keepRevisionForever)
     {
-        queryParams[U("keepRevisionForever")] = ApiClient::parameterToString(keepRevisionForever);
+        queryParams[U("keepRevisionForever")] = "true";
     }
-    
+    if(!ocrLanguage.empty())
     {
         queryParams[U("ocrLanguage")] = ApiClient::parameterToString(ocrLanguage);
     }
-    
+    if(supportsTeamDrives)
     {
-        queryParams[U("supportsTeamDrives")] = ApiClient::parameterToString(supportsTeamDrives);
+        queryParams[U("supportsTeamDrives")] = "true";
     }
-    
+    if(useContentAsIndexableText)
     {
-        queryParams[U("useContentAsIndexableText")] = ApiClient::parameterToString(useContentAsIndexableText);
+        queryParams[U("useContentAsIndexableText")] = "true";
     }
 
     std::shared_ptr<IHttpBody> httpBody;
@@ -313,7 +324,6 @@ pplx::task<std::shared_ptr<File>> FilesApi::create(utility::string_t alt, utilit
         web::json::value json;
 
         json = ModelBase::toJson(body);
-
         httpBody = std::shared_ptr<IHttpBody>( new JsonBody( json ) );
     }
     // multipart formdata
@@ -352,9 +362,11 @@ pplx::task<std::shared_ptr<File>> FilesApi::create(utility::string_t alt, utilit
         // 5xx - client error  : not OK
         if (response.status_code() >= 400)
         {
+//            std::string string = response.extract_json(true).get().serialize();
+            std::string string = response.extract_utf8string(true).get();
             throw ApiException(response.status_code()
-                , U("error calling drive.files.create: ") + response.reason_phrase()
-                , std::make_shared<std::stringstream>(response.extract_utf8string(true).get()));
+                , U("error calling drive.files.create: ") + response.reason_phrase() + string
+                , std::make_shared<std::stringstream>(string));
         }
 
         // check response content type
@@ -435,11 +447,11 @@ pplx::task<void> FilesApi::delete_(utility::string_t fileId, utility::string_t a
 
     std::unordered_set<utility::string_t> consumeHttpContentTypes;
 
-    
+    if(!alt.empty())
     {
         queryParams[U("alt")] = ApiClient::parameterToString(alt);
     }
-    
+    if(!fields.empty())
     {
         queryParams[U("fields")] = ApiClient::parameterToString(fields);
     }

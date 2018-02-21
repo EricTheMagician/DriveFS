@@ -5,9 +5,11 @@
 #include <gdrive/FileIO.h>
 #include <thread>
 #include <cpprest/http_client.h>
+#include <easylogging++.h>
+#include <experimental/filesystem>
 using namespace web::http::client;          // HTTP client features
 using Object = DriveFS::_Object;
-#include <easylogging++.h>
+namespace fs = std::experimental::filesystem;
 
 inline uint64_t getChunkStart(uint64_t start, uint64_t buffer_size){
     uint64_t chunkNumber = start / buffer_size;
@@ -82,6 +84,12 @@ namespace DriveFS{
             write_buffer = new std::vector<unsigned char>((int)(write_buffer_size), 0);
         }
     }
+    void FileIO::create_write_buffer2(){
+        create_write_buffer();
+        if(write_buffer2 == nullptr){
+            write_buffer2 = new std::vector<unsigned char>((int)(write_buffer_size), 0);
+        }
+    }
 
     std::vector<unsigned char> * FileIO::getFromCache( const size_t &size, const off_t &off ){
 
@@ -100,7 +108,7 @@ namespace DriveFS{
 
         DownloadItem item;
         auto buffer = new std::vector<unsigned char>(size, 0);
-        if ( item = m_file->m_buffers->at(chunkStart).lock()) {
+        if ( (item = m_file->m_buffers->at(chunkStart).lock()) ) {
 
             if(item->buffer==nullptr || item->buffer->empty()){
                 item->event.wait();
@@ -136,7 +144,7 @@ namespace DriveFS{
             cacheName = ss.str();
             DownloadItem item;
 
-            if ( item=m_file->m_buffers->at(chunkNumber2).lock()) {
+            if ( (item=m_file->m_buffers->at(chunkNumber2).lock()) ) {
                 if(item) {
                     if( item->buffer->empty() ){
                         item->event.wait();
@@ -216,6 +224,42 @@ namespace DriveFS{
             return getFromCache( size, off);
         }
 
+    }
+
+    void FileIO::open(){
+        fs::path file_location(CACHEPATH);
+        file_location /= m_file->getId();
+        f_name = file_location.string();
+        b_is_cached = true;
+
+        if(m_writeable){
+            clearFileFromCache();
+            m_file->attribute.st_size = 0;
+            stream.open(f_name, std::ios_base::out);
+            create_write_buffer();
+            create_write_buffer2();
+        }
+        else if(m_readable) {
+//            if (m_file->isUploaded()) {
+//                //file is not cached on the hdd
+//                b_is_cached = false;
+//                return;
+//            }
+
+            stream.open(file_location.string());
+        }
+
+        return;
+
+    }
+
+    void FileIO::clearFileFromCache(){
+        auto buffers = m_file->m_buffers;
+        if(buffers != nullptr) {
+            for (auto weak: *buffers) {
+                weak.reset();
+            }
+        }
     }
 
 

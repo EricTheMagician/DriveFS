@@ -65,6 +65,13 @@ public:
         sema.signal();
     }
 
+    void updateAccessTime(heap_handle handle, DownloadItem item){
+        sema.wait();
+        item->last_access = time(NULL);
+        cache->update(handle, item);
+        sema.signal();
+    }
+
 private:
     boost::heap::fibonacci_heap<DownloadItem> *cache; // queue storing cached data by last access
     std::atomic<size_t> cacheSize; // total bytes of data in cache

@@ -9,6 +9,7 @@
 //using namespace web;
 using namespace web::http;
 using namespace web::http::client;
+using namespace bsoncxx::builder;
 
 static mongocxx::options::update upsert;
 static mongocxx::options::find_one_and_update find_and_upsert;
@@ -22,7 +23,10 @@ namespace DriveFS {
         "https://accounts.google.com/o/oauth2/v2/auth",
         "https://www.googleapis.com/oauth2/v4/token",
         "http://localhost:7878",
-        GDRIVE_OAUTH_SCOPE) {
+        GDRIVE_OAUTH_SCOPE),
+         m_id_buffer(10),
+                         filesApi(m_apiClient)
+    {
         upsert.upsert(true);
         find_and_upsert.upsert(true);
 
@@ -55,6 +59,7 @@ namespace DriveFS {
         m_oauth2_config.set_token(token);
         m_oauth2_config.token_from_refresh().get();
         m_http_config.set_oauth2(m_oauth2_config);
+        m_apiConfig->setHttpConfig(m_http_config);
         m_needToInitialize = false;
         getFilesAndFolders();
 
@@ -437,8 +442,6 @@ namespace DriveFS {
 
                 upsert_op.upsert(true);
                 documents.append(upsert_op);
-
-
             }
         }
 
@@ -453,4 +456,155 @@ namespace DriveFS {
         }
 
     }
+    std::string Account::getNextId(){
+        m_event.wait();
+        if(m_id_buffer.empty()){
+            generateIds();
+        }
+        const std::string id(m_id_buffer.front());
+        m_id_buffer.pop_front();
+        m_event.signal();
+        return id;
+    }
+    void Account::generateIds(int_fast8_t backoff){
+        http_client client(m_apiEndpoint, m_http_config);
+        uri_builder builder("files/generateIds");
+        builder.append_query("coun=10");
+        builder.append_query("space=drive");
+        builder.append_query("fields=ids");
+
+        http_response resp = client.request(methods::GET, builder.to_string()).get();
+        if(resp.status_code() != 200){
+            LOG(ERROR) << "Failed to generate Ids: " << resp.reason_phrase();
+            LOG(ERROR) << resp.extract_json(true).get();
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 5) {
+                generateIds(backoff + 1);
+            }
+            return;
+
+        }
+
+        bsoncxx::document::value doc = bsoncxx::from_json(resp.extract_utf8string().get());
+        auto view = doc.view();
+        for(auto id: view["ids"].get_array().value){
+            m_id_buffer.push_front(id.get_utf8().value.to_string());
+        }
+
+    }
+
+    bool Account::createFolderOnGDrive(std::string json, int backoff){
+        http_client client("https://www.googleapis.com/upload/drive/v3/", m_http_config);
+        uri_builder builder("files");
+        builder.append_query("supportsTeamDrives", "true");
+        builder.append_query("uploadType", "resumable");
+
+        http_response resp = client.request(methods::POST, builder.to_string(), json).get();
+        if(resp.status_code() != 200){
+            LOG(ERROR) << "Failed to create folders: " << resp.reason_phrase();
+            LOG(ERROR) << json;
+            LOG(ERROR) << resp.extract_json(true).get();
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 5) {
+                return createFolderOnGDrive(json, backoff + 1);
+            }
+            return false;
+
+        }
+        int code = resp.status_code();
+        auto s = resp.extract_utf8string(true).get();
+        return true;
+
+    }
+
+    bool Account::createFolderOnGDrive(json::value json, int backoff){
+        http_client client("https://www.googleapis.com/upload/drive/v3/", m_http_config);
+        uri_builder builder("files");
+        builder.append_query("supportsTeamDrives", "true");
+        builder.append_query("uploadType", "resumable");
+
+        http_response resp = client.request(methods::POST, builder.to_string(), json).get();
+        if(resp.status_code() != 200){
+            LOG(ERROR) << "Failed to create folders: " << resp.reason_phrase();
+            LOG(ERROR) << json;
+            LOG(ERROR) << resp.extract_json(true).get();
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 5) {
+                return createFolderOnGDrive(json, backoff + 1);
+            }
+            return false;
+
+        }
+
+        int code = resp.status_code();
+        auto s = resp.extract_utf8string(true).get();
+
+
+
+        return true;
+
+    }
+
+    bool Account::createFolderOnGDrive(std::shared_ptr<io::swagger::client::model::File> body, int backoff) {
+
+//        m_apiConfig->setBaseUrl("https://www.googleapis.com/upload/drive/v3/");
+//        m_apiConfig->setBaseUrl("https://www.googleapis.com/drive/v3");
+
+        auto file = filesApi.create(/*alt*/"" , /*fields*/"",
+                /* apiKey */ "", /* acces token */ /*m_http_config.oauth2()->access_token_key()*/ "",
+                /* pretty print */ false,
+                /* quotaUser*/ "", /* userIp */ "",
+                /* std::shared_ptr<File>  */ body,
+                /* ignoreDefaultVisibility */ false,  /* keepRevisionForever*/ false,
+                /* ocrLanguage*/ "", /* supportsTeamDrives */ true,
+                /* useContentAsIndexableText*/ false).get();
+
+        return true;
+    }
+
+    GDriveObject Account::createNewChild(GDriveObject parent, const char *name, int mode, bool isFile){
+
+        auto obj = _Object(inode_count.fetch_add(1, std::memory_order_acquire)+1, std::string(getNextId()), name, mode, isFile);
+
+        if(!isFile){
+
+            std::shared_ptr<io::swagger::client::model::File> body = std::make_shared<io::swagger::client::model::File>();
+            body->setMimeType("application/vnd.google-apps.folder");
+            body->setId(obj.getId());
+            body->setName(name);
+            std::vector<utility::string_t> parents(1);
+            parents[0] = parent->getId();
+            body->setParents(parents);
+            bool status = createFolderOnGDrive(body);
+            if(status){
+                mongocxx::pool::entry conn = pool.acquire();
+                mongocxx::database client = conn->database(DATABASENAME);
+                mongocxx::collection db = client[DATABASESETTINGS];
+                bsoncxx::document::value doc = obj.to_bson();
+                db.insert_one(std::move(doc));
+            }
+
+        }
+        //TODO: Add a regular file to dastabase
+
+        auto o = std::make_shared<_Object>(obj);
+        parent->addChild(o);
+        o->addParent(parent);
+        return o;
+    }
+
+    void Account::removeChildFromParent(GDriveObject child, GDriveObject parent){
+        http_client client(m_apiEndpoint, m_http_config);
+        std::stringstream ss;
+        ss << "files/" << child->getId();
+        uri_builder builder(ss.str());
+        builder.append_query("removeParents", parent->getId());
+    }
+
 }

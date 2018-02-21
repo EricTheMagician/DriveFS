@@ -52,6 +52,9 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         ./external
         ./external/adaptive_time_parser
         ./external/semaphore/common
+        ./external/gdrive-cpprest-client
+        ./external/gdrive-cpprest-client/api
+        ./external/gdrive-cpprest-client/model
         /usr/include/openssl-1.0
         /usr/local/include/mongocxx/v_noabi
         /usr/local/include/bsoncxx/v_noabi

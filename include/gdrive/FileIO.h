@@ -32,6 +32,8 @@
 #define BLOCKREADAHEADSTART 2097152
 #define BLOCKREADAHEADFINISH 2359296
 
+
+
 namespace DriveFS {
 
 
@@ -54,6 +56,7 @@ namespace DriveFS {
         void release();
 
         void create_write_buffer();
+        void create_write_buffer2();
 
 //        static inline size_t get_buffer_size() {return write_buffer_size;};
 
@@ -61,19 +64,9 @@ namespace DriveFS {
             return m_readable;
         }
 
-    protected:
-
-
-
-    private:
-        void download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
-
-        void upload();
-
-        void clearFileFromCache();
+    public:
 
         std::vector<unsigned char> * getFromCache(const size_t &size, const off_t &off);
-
 
         Account *m_account;
 
@@ -85,11 +78,17 @@ namespace DriveFS {
 
         bool m_readable, m_writeable;
 //        int m_flags;
-
-        std::vector<unsigned char> *write_buffer;
+        std::vector<unsigned char> *write_buffer, *write_buffer2;
         off_t last_write_to_buffer, first_write_to_buffer;
-
         std::fstream stream;
+
+    private:
+        void download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
+
+        void upload();
+
+        void clearFileFromCache();
+
 
     };
 }

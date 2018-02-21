@@ -15,7 +15,6 @@
 #include <atomic>
 
 #include "DownloadBuffer.h"
-#include <autoresetevent.h>
 
 namespace DriveFS {
 
@@ -27,8 +26,8 @@ namespace DriveFS {
     public:
         static GDriveObject buildRoot(bsoncxx::document::view document);
         static void updateInode(ino_t ino, bsoncxx::document::view document);
-        _Object();
-        _Object(ino_t ino, bsoncxx::document::view document);
+        _Object(ino_t ino, bsoncxx::document::view document); // default object creation
+        _Object(ino_t ino, const std::string &id, const char *name, mode_t mode, bool isFile);
         _Object(const DriveFS::_Object&);
         _Object(DriveFS::_Object&&);
         ~_Object();
@@ -47,21 +46,25 @@ namespace DriveFS {
 
         void createVectorsForBuffers();
         void updatLastAccessToCache(uint64_t chunkNumber);
+        inline bool getIsUploaded() const{return isUploaded;}
+        void trash();
+        GDriveObject findChildByName( const char *name) const ;
+        bsoncxx::document::value to_bson();
 
     public:
-        std::atomic_uint64_t lookupCount; // for filesystem lookup count
         std::vector<GDriveObject> parents, children;
         std::vector<WeakBuffer> *m_buffers; // a vector pointing to possible download m_buffers
         std::vector<heap_handle> *heap_handles;
-        AutoResetEvent m_event;
 
     protected:
-        std::string m_name;
+        _Object(); // used for creating a default object when creating root folders
+
         void addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship);
         bool trashed, starred;
         std::string m_id, mime_type, selflink, md5Checksum;
         uint_fast64_t version;
         bool isFolder, isTrashable, canRename;
+        bool isUploaded;
 
 
     };

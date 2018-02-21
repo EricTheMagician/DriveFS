@@ -14,6 +14,7 @@ static adaptive::datetime::adaptive_parser parser { adaptive::datetime::adaptive
 //    "%Y-%m-%dT%H:%M:%SZ
 } };
 
+
 struct timespec getTimeFromRFC3339String(const std::string &str_date){
     date::sys_time<std::chrono::milliseconds> tp;
     std::stringstream ss( str_date );
@@ -23,14 +24,57 @@ struct timespec getTimeFromRFC3339String(const std::string &str_date){
 
 }
 
+std::string getRFC3339StringFromTime(const struct timespec &time){
+    char date[100];
+    struct tm *timeinfo = localtime (&time.tv_sec);
+    strftime(&date[0], 100, "%FT%T", timeinfo);
+
+    std::string s(date);
+    s += "." + std::to_string(time.tv_nsec) + "Z";
+    return s;
+}
+
 namespace DriveFS{
+
     std::map<ino_t, GDriveObject> _Object::inodeToObject;
     std::map<std::string, GDriveObject> _Object::idToObject;
     PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(512*1024*1024);
 
-    _Object::_Object():lookupCount(0), m_buffers(nullptr), heap_handles(nullptr), m_event(1){
+    _Object::_Object():File(), m_buffers(nullptr), heap_handles(nullptr), isUploaded(false){
     }
-    _Object::_Object(const DriveFS::_Object& that) {
+
+    _Object::_Object(ino_t ino, const std::string &id, const char *name, mode_t mode, bool isFile):
+            File(name),
+            isFolder(!isFile),
+            isTrashable(true), canRename(true),
+            m_buffers(nullptr),
+            heap_handles(nullptr)
+    {
+        memset(&attribute, 0, sizeof(struct stat));
+        if(isFile) {
+            attribute.st_size = 0;
+            attribute.st_nlink = 0;
+            attribute.st_mode = mode | S_IFREG;
+        }else {
+            attribute.st_size = 4096;
+            attribute.st_nlink = 1;
+            attribute.st_mode = mode | S_IFDIR;
+        }
+        attribute.st_ino = ino;
+
+        struct timespec now{time(nullptr),0};
+        attribute.st_ctim = now;
+        attribute.st_mtim = now;
+        attribute.st_atim = now;
+
+        attribute.st_uid = 65534; // nobody
+        attribute.st_gid = 65534;
+        isUploaded = false;
+
+        m_id = id;
+    }
+
+    _Object::_Object(const DriveFS::_Object& that):File() {
         lookupCount = that.lookupCount.load(std::memory_order_acquire);
         parents = that.parents;
         children = that.children;
@@ -48,12 +92,17 @@ namespace DriveFS{
         attribute = that.attribute;
         if (that.m_buffers != nullptr) {
             m_buffers = new std::vector<WeakBuffer>(*(that.m_buffers));
+        }else{
+            m_buffers = nullptr;
         }
-        if(that.heap_handles){
+        if(that.heap_handles != nullptr){
             heap_handles = new std::vector<heap_handle>(*(that.heap_handles));
+        }else{
+            heap_handles = nullptr;
         }
+        isUploaded = that.isUploaded;
     }
-    _Object::_Object(DriveFS::_Object&& that){
+    _Object::_Object(DriveFS::_Object&& that): File(){
         lookupCount = that.lookupCount.load(std::memory_order_acquire);
         parents = std::move(that.parents);
         children = std::move(that.children);
@@ -73,10 +122,12 @@ namespace DriveFS{
         that.m_buffers = nullptr;
         heap_handles = that.heap_handles;
         that.heap_handles = nullptr;
-
+        isUploaded = that.isUploaded;
     }
 
-    _Object::_Object(ino_t ino, bsoncxx::document::view document):m_event(1),lookupCount(0), m_buffers(nullptr), heap_handles(nullptr){
+    _Object::_Object(ino_t ino, bsoncxx::document::view document):File(), m_buffers(nullptr), heap_handles(nullptr),
+        isUploaded(true)
+    {
         attribute.st_ino = ino;
         m_id = document["id"].get_utf8().value.to_string();
 
@@ -126,6 +177,7 @@ namespace DriveFS{
     }
     GDriveObject _Object::buildRoot(bsoncxx::document::view document){
         _Object f;
+        f.isUploaded = false;
 
         f.attribute.st_ino = 1;
         f.attribute.st_size = 0;
@@ -151,6 +203,9 @@ namespace DriveFS{
 
     GDriveObject _Object::buildTeamDriveHolder(ino_t ino, GDriveObject root){
         _Object f;
+
+        f.isUploaded = false;
+        f.canRename = false;
 
         f.attribute.st_ino = ino;
         f.attribute.st_size = 0;
@@ -207,9 +262,11 @@ namespace DriveFS{
 
 
     void _Object::addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship){
+        m_event.wait();
         if( std::find(relationship.begin(), relationship.end(), other) == relationship.end() ){
             relationship.emplace_back(other);
         }
+        m_event.signal();
     }
 
     void _Object::updateInode(ino_t ino, bsoncxx::document::view document) {
@@ -238,9 +295,49 @@ namespace DriveFS{
     }
 
     void _Object::updatLastAccessToCache(uint64_t chunkNumber){
-        cache;
+        DownloadItem item = m_buffers->at(chunkNumber).lock();
+        if(item) {
+            cache.updateAccessTime((*heap_handles)[chunkNumber], item);
+        }
     }
 
+    void _Object::trash(){
+        if(lookupCount.load(std::memory_order_acquire) == 0){
+            _Object::inodeToObject.erase(attribute.st_ino);
+            _Object::idToObject.erase(m_id);
+        }
+    }
 
+    GDriveObject _Object::findChildByName(const char *name) const {
+        for (auto child: children) {
+            if (child->getName().compare(name) == 0) {
+                return child;
+            }
+        }
+        return nullptr;
+    }
+
+    bsoncxx::document::value _Object::to_bson()
+    {
+
+        bsoncxx::builder::stream::document doc;
+        doc << "id" << m_id;
+        if(isFolder) {
+            doc << "mimeType" << "application/vnd.google-apps.folder";
+        }else{
+            if(mime_type.empty()) {
+                doc << "mimeType" << "octet-stream";
+            }else{
+                doc << "mimeType" << mime_type;
+            }
+            doc << "size" << std::to_string(attribute.st_size);
+        }
+
+        doc << "name" << m_name ;
+        doc << "modifiedTime" << getRFC3339StringFromTime(attribute.st_mtim);
+        doc << "createdTime" << getRFC3339StringFromTime(attribute.st_ctim);
+
+        return doc.extract();
+    }
 
 }
