@@ -140,7 +140,27 @@ namespace DriveFS{
 
     }
 
-    void rmdir(fuse_req_t req, fuse_ino_t parent, const char *name);
+    void rmdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
+        auto parent = getObjectFromInodeAndReq(req, parent_ino);
+        GDriveObject child = parent->findChildByName(name);
+        if(child){
+            child->m_event.wait();
+
+            if( !child->children.empty() ){
+                child->m_event.signal();
+                fuse_reply_err(req, ENOTEMPTY);
+            }else {
+                auto account = getAccount(req);
+                account->removeChildFromParent(child, parent);
+                child->m_event.signal();
+            }
+
+
+        }else{
+            fuse_reply_err(req, ENOENT);
+        }
+
+    }
 
     void symlink(fuse_req_t req, const char *link, fuse_ino_t parent, const char *name);
 

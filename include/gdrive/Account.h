@@ -21,7 +21,6 @@
 #include "easylogging++.h"
 #include <boost/circular_buffer.hpp>
 #include <string_view>
-#include <FilesApi.h>
 
 using namespace web::http::client;          // HTTP client features
 using namespace web::http::oauth2::experimental;
@@ -48,7 +47,7 @@ namespace DriveFS {
         }
 
         GDriveObject createNewChild(GDriveObject parent, const char *name, int mode, bool isFile);
-        void removeChildFromParent(GDriveObject child, GDriveObject parent);
+        bool removeChildFromParent(GDriveObject child, GDriveObject parent);
     protected:
         void run_internal() override;
         void loadFilesAndFolders() override;
@@ -58,18 +57,12 @@ namespace DriveFS {
         void linkParentsAndChildren();
         std::string getNextId();
         void generateIds(int_fast8_t backoff=0);
-        bool createFolderOnGDrive(const std::string json, int backoff=0);
-        bool createFolderOnGDrive(const json::value json, int backoff=0);
-        bool createFolderOnGDrive(std::shared_ptr<io::swagger::client::model::File> json, int backoff=0);
+        std::string createFolderOnGDrive(const std::string json, int backoff=0);
 
         boost::circular_buffer<std::string> m_id_buffer;
-//        oauth2_config m_oauth2_config;
-//        http_client_config m_http_config;
-//        http_client m_api = http_client("https://gooleapis.com/drive/v3", m_http_config);
 
         std::string m_newStartPageToken="";
         std::atomic<ino_t> inode_count = 1;
-        FilesApi filesApi;
     };
 };
 

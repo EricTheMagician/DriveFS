@@ -127,15 +127,8 @@ BaseAccount::BaseAccount(std::string api, std::string id, std::string secret,
         m_listener(new oauth2_code_listener(redirect, m_oauth2_config)),
         m_needToInitialize(true),
         m_event(1),
-        m_key(id),
-        m_apiConfig(std::make_shared<ApiConfiguration>()),
-        m_apiClient(std::make_shared<ApiClient>())
-
-{
-    m_apiConfig->setBaseUrl(api);
-    m_apiConfig->setHttpConfig(m_http_config);
-    m_apiClient->setConfiguration(m_apiConfig);
-};
+        m_key(id)
+{};
 
 void BaseAccount::open_browser_auth()
 {

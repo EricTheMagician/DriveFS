@@ -13,7 +13,6 @@
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/document/value.hpp>
 #include <atomic>
-
 #include "DownloadBuffer.h"
 
 namespace DriveFS {
@@ -41,6 +40,8 @@ namespace DriveFS {
         inline std::string getId() const{return m_id;}
         inline bool getIsFolder() const {return isFolder;};
         inline void addParent(GDriveObject parent){addRelationship(std::move(parent), parents);};
+        bool removeChild(GDriveObject child);
+        bool removeParent(GDriveObject child);
         inline void addChild(GDriveObject child){attribute.st_nlink++;addRelationship(std::move(child), children);};
         inline size_t getFileSize() const { return attribute.st_size; }
 

@@ -340,4 +340,16 @@ namespace DriveFS{
         return doc.extract();
     }
 
+    bool _Object::removeChild(GDriveObject child){
+        m_event.wait();
+        children.erase(std::find(children.begin(),children.end(), child));
+        m_event.signal();
+    }
+
+    bool _Object::removeParent(GDriveObject parent){
+        m_event.wait();
+        parents.erase(std::find(parents.begin(),parents.end(), parent));
+        m_event.signal();
+    }
+
 }

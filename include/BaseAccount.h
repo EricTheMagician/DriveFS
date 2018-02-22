@@ -9,8 +9,6 @@
 #include <cpprest/http_client.h>
 #include <cpprest/http_listener.h>
 #include <autoresetevent.h>
-#include <ApiClient.h>
-#include <ApiConfiguration.h>
 
 using namespace utility;
 using namespace web;
@@ -19,7 +17,6 @@ using namespace web::http::client;
 using namespace web::http::oauth2::experimental;
 using namespace web::http::experimental::listener;
 extern mongocxx::pool pool; //pool(  std::move(mongocxx::uri("mongodb://localhost?minPoolSize=4&maxPoolSize=16") ) );
-using namespace io::swagger::client::api;
 
 class oauth2_code_listener
 {
@@ -66,8 +63,6 @@ protected:
     bool m_needToInitialize;
     struct fuse_session *m_fuse_session;
     AutoResetEvent m_event;
-    std::shared_ptr<ApiConfiguration> m_apiConfig;
-    std::shared_ptr<ApiClient> m_apiClient;
     std::string m_key;
 
 };
