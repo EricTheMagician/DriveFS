@@ -56,8 +56,11 @@ namespace DriveFS {
         void getTeamDrives(int backoff=0);
         void linkParentsAndChildren();
         std::string getNextId();
+
         void generateIds(int_fast8_t backoff=0);
         std::string createFolderOnGDrive(const std::string json, int backoff=0);
+        bool trash(GDriveObject file, int backoff=0);
+        void refresh_token(int backoff=0);
 
         boost::circular_buffer<std::string> m_id_buffer;
 

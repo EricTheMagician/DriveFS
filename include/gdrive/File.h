@@ -42,7 +42,11 @@ namespace DriveFS {
         inline void addParent(GDriveObject parent){addRelationship(std::move(parent), parents);};
         bool removeChild(GDriveObject child);
         bool removeParent(GDriveObject child);
-        inline void addChild(GDriveObject child){attribute.st_nlink++;addRelationship(std::move(child), children);};
+        inline void addChild(GDriveObject child){
+            if(child->trashed) return;
+            attribute.st_nlink++;
+            addRelationship(std::move(child), children);
+        };
         inline size_t getFileSize() const { return attribute.st_size; }
 
         void createVectorsForBuffers();

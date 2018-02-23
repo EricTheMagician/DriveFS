@@ -56,10 +56,31 @@ namespace DriveFS {
         token.set_token_type("Bearer");
         token.set_scope(GDRIVE_OAUTH_SCOPE);
         m_oauth2_config.set_token(token);
-        m_oauth2_config.token_from_refresh().get();
+        refresh_token();
         m_http_config.set_oauth2(m_oauth2_config);
         m_needToInitialize = false;
         getFilesAndFolders();
+
+    }
+
+    void Account::refresh_token(int backoff){
+        m_event.wait();
+        try {
+            m_oauth2_config.token_from_refresh().get();
+        }catch(std::exception &e){
+            m_event.signal();
+            LOG(ERROR) << "Failed to refresh token";
+            LOG(ERROR) << e.what();
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 6) {
+                refresh_token(backoff + 1);
+            }
+            return;
+
+        }
+        m_event.signal();
 
     }
 
@@ -309,7 +330,6 @@ namespace DriveFS {
         bool hasItemsToDelete = false;
         if (eleChanges) {
             bsoncxx::array::view changes = eleChanges.get_array().value;
-            needs_updating = !changes.empty();
             int count = 0;
             for (const auto &change : changes) {
                 auto doc = change.get_document();
@@ -318,13 +338,16 @@ namespace DriveFS {
                 if (!file) {
                     auto deleted = view["removed"];
                     if (deleted) {
-                        if (deleted.get_bool()) {
+                        if (deleted.get_bool().value) {
+                            LOG(DEBUG) << bsoncxx::to_json(doc);
                             toDelete.append(view["fileId"].get_utf8());
                             hasItemsToDelete = true;
                         }
                     }
                     continue;
                 }
+
+                needs_updating = true;
                 auto fileDoc = file.get_document();
                 auto id = view["fileId"].get_utf8().value.to_string();
 
@@ -347,17 +370,20 @@ namespace DriveFS {
         }
 
 
-        if (needs_updating) {
+        if (needs_updating or hasItemsToDelete) {
             mongocxx::pool::entry conn = pool.acquire();
             mongocxx::database client = conn->database(DATABASENAME);
             mongocxx::collection data = client[DATABASEDATA];
             mongocxx::collection settings = client[DATABASESETTINGS];
 
-            data.bulk_write(documents);
+            if(needs_updating) {
+                data.bulk_write(documents);
+            }
             if (hasItemsToDelete) {
                 data.delete_many(
-                    document{} << "fileId" << open_document << "$in" << toDelete << close_document << finalize
+                    document{} << "id" << open_document << "$in" << toDelete << close_document << finalize
                 );
+
             }
 
 
@@ -544,9 +570,8 @@ namespace DriveFS {
 
                 mongocxx::pool::entry conn = pool.acquire();
                 mongocxx::database client = conn->database(DATABASENAME);
-                mongocxx::collection db = client[DATABASESETTINGS];
+                mongocxx::collection db = client[DATABASEDATA];
                 db.insert_one(obj.to_bson());
-                return std::make_shared<_Object>(std::move(obj));
             }else{
                 return nullptr;
             }
@@ -554,7 +579,7 @@ namespace DriveFS {
         }
         //TODO: Add a regular file to dastabase
 
-        auto o = std::make_shared<_Object>(obj);
+        auto o = std::make_shared<_Object>(std::move(obj));
         parent->addChild(o);
         o->addParent(parent);
         return o;
@@ -566,13 +591,40 @@ namespace DriveFS {
     bool Account::removeChildFromParent(GDriveObject child, GDriveObject parent){
 
 
-        parent->removeChild(child);
         if(child->parents.size() == 1){
-//            filesApi.delete_(child->getId(),"", "", "", "", false, "", "", true);
+            if(trash(child)) {
+                parent->removeChild(child);
+                return true;
+            }
         }else{
             child->removeParent(parent);
         }
         return false;
     }
 
+    bool Account::trash(GDriveObject file, int backoff){
+        http_client client(m_apiEndpoint, m_http_config);
+        std::stringstream ss;
+        ss << "files/";
+        ss << file->getId();
+        uri_builder builder(ss.str());
+        builder.append_query("supportsTeamDrives", "true");
+        http_response resp = client.request(methods::DEL, builder.to_string()).get();
+        if(resp.status_code() != 204){
+            if(resp.status_code() == 404){
+                return true;
+            }
+            LOG(ERROR) << "Failed to delete file or folder: " << resp.reason_phrase();
+            LOG(ERROR) << "http status code\t" << resp.status_code();
+            LOG(ERROR) << resp.extract_utf8string(true).get();
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 5) {
+                return trash(file, backoff + 1);
+            }
+            return false;
+        };
+        return true;
+    }
 }

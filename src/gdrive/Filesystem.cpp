@@ -31,7 +31,7 @@ namespace DriveFS{
     }
 
     void lookup(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
-//        SFAsync([=] {
+        SFAsync([=] {
             GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
             for (auto child: parent->children) {
                 if (child->getName().compare(name) == 0) {
@@ -47,38 +47,42 @@ namespace DriveFS{
                 }
             }
             fuse_reply_err(req, ENOENT);
-//        });
+        });
     }
 
     void forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup){
-        auto object = getObjectFromInodeAndReq(req, ino);
-        if( object ){
-            uint64_t current = object->lookupCount.fetch_sub(nlookup, std::memory_order_acquire)-nlookup;
-            if(current == 0){
-                ino_t self = object->attribute.st_ino;
-                for(const GDriveObject &parent: object->parents){
-                    auto children = &(parent->children);
-                    auto it = std::find(children->begin(), children->end(), object);
-                    if(it != children->end()) {
-                        parent->children.erase(it);
+        SFAsync([=] {
+            auto object = getObjectFromInodeAndReq(req, ino);
+            if (object) {
+                uint64_t current = object->lookupCount.fetch_sub(nlookup, std::memory_order_acquire) - nlookup;
+                if (current == 0) {
+                    ino_t self = object->attribute.st_ino;
+                    for (const GDriveObject &parent: object->parents) {
+                        auto children = &(parent->children);
+                        auto it = std::find(children->begin(), children->end(), object);
+                        if (it != children->end()) {
+                            parent->children.erase(it);
+                        }
                     }
+                    _Object::inodeToObject.erase(self);
+                    _Object::idToObject.erase(object->getId());
                 }
+
             }
 
-        }
-
-        fuse_reply_none(req);
-
+            fuse_reply_none(req);
+        });
     }
 
     void getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        GDriveObject object(getObjectFromInodeAndReq(req, ino));
-        if(object){
-            fuse_reply_attr(req, &(object->attribute), 180.0);
-            return;
-        }
-        fuse_reply_err(req, ENOENT);
-
+        SFAsync([=] {
+            GDriveObject object(getObjectFromInodeAndReq(req, ino));
+            if (object) {
+                fuse_reply_attr(req, &(object->attribute), 180.0);
+                return;
+            }
+            fuse_reply_err(req, ENOENT);
+        });
     }
 
     void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi);
@@ -88,78 +92,87 @@ namespace DriveFS{
     void mknod(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev_t rdev);
 
     void mkdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name, mode_t mode){
-        auto parent = getObjectFromInodeAndReq(req, parent_ino);
-        GDriveObject child = parent->findChildByName(name);
-        if(  child  ){
-            fuse_reply_err(req, EEXIST);
-            return;
-        }
+        SFAsync([=] {
+            auto parent = getObjectFromInodeAndReq(req, parent_ino);
+            GDriveObject child = parent->findChildByName(name);
+            if (child) {
+                fuse_reply_err(req, EEXIST);
+                return;
+            }
 
-        auto account = getAccount(req);
-        auto folder = account->createNewChild(parent, name, mode, false);
-        struct fuse_entry_param e;
-        memset(&e, 0, sizeof(e));
-        e.attr = folder->attribute;
-        e.ino = e.attr.st_ino;
-        e.attr_timeout = 18000.0;
-        e.entry_timeout = 18000.0;
-        folder->lookupCount.fetch_add(1, std::memory_order_relaxed);
-        fuse_reply_entry(req, &e);
+            auto account = getAccount(req);
+            auto folder = account->createNewChild(parent, name, mode, false);
+            struct fuse_entry_param e;
+            memset(&e, 0, sizeof(e));
+            e.attr = folder->attribute;
+            e.ino = e.attr.st_ino;
+            e.attr_timeout = 18000.0;
+            e.entry_timeout = 18000.0;
+            folder->lookupCount.fetch_add(1, std::memory_order_relaxed);
+            fuse_reply_entry(req, &e);
+        });
     }
 
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
-        auto account = getAccount(req);
-        GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
-        parent->m_event.wait();
-        bool signaled = false;
-        auto children = &(parent->children);
-        for (uint_fast32_t i =0; i < children->size(); i++ ) {
-            auto child = (*children)[i];
-            if (child->getName().compare(name) == 0) {
-                children->erase(children->begin()+i);
-                parent->m_event.signal();
-                signaled = true;
-                child->m_event.wait();
+        SFAsync([=] {
+            auto account = getAccount(req);
+            GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
+            parent->m_event.wait();
+            bool signaled = false;
+            auto children = &(parent->children);
+            for (uint_fast32_t i = 0; i < children->size(); i++) {
+                auto child = (*children)[i];
+                if (child->getName().compare(name) == 0) {
+                    children->erase(children->begin() + i);
+                    parent->m_event.signal();
+                    signaled = true;
+                    child->m_event.wait();
 
-                if(child->getIsUploaded()) {
-                    account->removeChildFromParent(child, parent);
+                    if (child->getIsUploaded()) {
+                        account->removeChildFromParent(child, parent);
+                    }
+
+                    child->trash();
+                    child->m_event.signal();
+                    break;
                 }
-
-                child->trash();
-                child->m_event.signal();
-                break;
             }
-        }
 
-        if(!signaled){
-            parent->m_event.signal();
-            fuse_reply_err(req, ENOENT);
-        }else{
-            fuse_reply_err(req, 0);
-        }
+            if (!signaled) {
+                parent->m_event.signal();
+                fuse_reply_err(req, ENOENT);
+            } else {
+                fuse_reply_err(req, 0);
+            }
+        });
 
     }
 
     void rmdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
-        auto parent = getObjectFromInodeAndReq(req, parent_ino);
-        GDriveObject child = parent->findChildByName(name);
-        if(child){
-            child->m_event.wait();
+        SFAsync([=] {
+            auto parent = getObjectFromInodeAndReq(req, parent_ino);
+            GDriveObject child = parent->findChildByName(name);
+            if (child) {
+                child->m_event.wait();
 
-            if( !child->children.empty() ){
-                child->m_event.signal();
-                fuse_reply_err(req, ENOTEMPTY);
-            }else {
-                auto account = getAccount(req);
-                account->removeChildFromParent(child, parent);
-                child->m_event.signal();
+                if (!child->children.empty()) {
+                    child->m_event.signal();
+                    fuse_reply_err(req, ENOTEMPTY);
+                } else {
+                    auto account = getAccount(req);
+                    if (account->removeChildFromParent(child, parent)) {
+                        fuse_reply_err(req, 0);
+                    } else {
+                        fuse_reply_err(req, EIO);
+                    }
+                    child->m_event.signal();
+                }
+
+
+            } else {
+                fuse_reply_err(req, ENOENT);
             }
-
-
-        }else{
-            fuse_reply_err(req, ENOENT);
-        }
-
+        });
     }
 
     void symlink(fuse_req_t req, const char *link, fuse_ino_t parent, const char *name);
@@ -169,22 +182,24 @@ namespace DriveFS{
     void link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname);
 
     void open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        GDriveObject object = getObjectFromInodeAndReq(req, ino);
-        if (object->getIsFolder()){
-            fuse_reply_err(req, EISDIR);
-            return;
-        }
+        SFAsync([=] {
+            GDriveObject object = getObjectFromInodeAndReq(req, ino);
+            if (object->getIsFolder()) {
+                fuse_reply_err(req, EISDIR);
+                return;
+            }
 
-        if(fi->flags & O_WRONLY || fi->flags & O_RDWR){
-            fuse_reply_err(req, ENOSYS);
-            return;
-        }
-        FileIO *io = new FileIO(object, fi->flags, getAccount(req));
-        fi->fh = (uintptr_t) io;
+            if (fi->flags & O_WRONLY || fi->flags & O_RDWR) {
+                fuse_reply_err(req, ENOSYS);
+                return;
+            }
+            FileIO *io = new FileIO(object, fi->flags, getAccount(req));
+            fi->fh = (uintptr_t) io;
 
-        fuse_reply_open(req, fi);
-        assert(io->getIsReadable());
-        return;
+            fuse_reply_open(req, fi);
+            assert(io->getIsReadable());
+            return;
+        });
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
@@ -450,6 +465,7 @@ namespace DriveFS{
         ops.unlink = unlink;
         ops.flush = flush;
         ops.mkdir = mkdir;
+        ops.rmdir = rmdir;
 
         return ops;
     }

@@ -166,7 +166,7 @@ namespace DriveFS{
                         attribute.st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;
                 }
         }
-
+        trashed = document["trashed"].get_bool().value;
         m_name = document["name"].get_utf8().value.to_string();
         attribute.st_mtim = getTimeFromRFC3339String(document["modifiedTime"].get_utf8().value.to_string());
         attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value.to_string());
