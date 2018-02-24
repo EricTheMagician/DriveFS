@@ -136,6 +136,7 @@ namespace DriveFS{
             isFolder = true;
             attribute.st_mode = S_IFDIR | S_IXUSR | S_IXGRP | S_IXOTH;
             attribute.st_size = 4096;
+            attribute.st_blocks = 1;
         }else{
             isFolder = false;
             attribute.st_mode = S_IFREG | S_IXUSR | S_IXGRP | S_IXOTH;
@@ -146,8 +147,10 @@ namespace DriveFS{
                 sz = document["quotaBytesUsed"];
                 if(sz){
                     attribute.st_size = std::atoll(sz.get_utf8().value.to_string().c_str());
+                    attribute.st_blocks = attribute.st_size / S_BLKSIZE  + 1;
                 }else {
                     attribute.st_size = 0;
+                    attribute.st_blocks = 0;
                 }
             }
             createVectorsForBuffers();
@@ -209,6 +212,7 @@ namespace DriveFS{
 
         f.attribute.st_ino = ino;
         f.attribute.st_size = 0;
+        f.attribute.st_blocks = 0;
         struct timespec now{time(nullptr),0};
         f.attribute.st_atim = now;
         f.attribute.st_mtim = now;
