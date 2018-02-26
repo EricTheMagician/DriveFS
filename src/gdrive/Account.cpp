@@ -3,8 +3,11 @@
 //
 
 #include "gdrive/Account.h"
+#include "BaseFileSystem.h"
+#include <cpprest/filestream.h>
 #include <easylogging++.h>
 #include <pplx/pplxtasks.h>
+
 //using namespace utility;
 //using namespace web;
 using namespace web::http;
@@ -24,8 +27,8 @@ namespace DriveFS {
         "https://www.googleapis.com/oauth2/v4/token",
         "http://localhost:7878",
         GDRIVE_OAUTH_SCOPE),
-         m_id_buffer(10)
-     {
+         m_id_buffer(10) {
+
         upsert.upsert(true);
         find_and_upsert.upsert(true);
 
@@ -63,11 +66,11 @@ namespace DriveFS {
 
     }
 
-    void Account::refresh_token(int backoff){
+    void Account::refresh_token(int backoff) {
         m_event.wait();
         try {
             m_oauth2_config.token_from_refresh().get();
-        }catch(std::exception &e){
+        } catch (std::exception &e) {
             m_event.signal();
             LOG(ERROR) << "Failed to refresh token";
             LOG(ERROR) << e.what();
@@ -117,7 +120,7 @@ namespace DriveFS {
             LOG(INFO) << "Access tokens founds";
             auto res = maybeResult->view();
             std::string at(res["access_token"].get_utf8().value.to_string()),
-                rt(res["refresh_token"].get_utf8().value.to_string());
+                    rt(res["refresh_token"].get_utf8().value.to_string());
             return Account(at, rt);
 
         }
@@ -132,8 +135,8 @@ namespace DriveFS {
         mongocxx::options::find options;
         options.projection(document{} << "parents" << 1 << "id" << 1 << finalize);
         auto cursor = db.find(
-            document{} << "parents" << open_document << "$exists" << 1 << close_document << finalize,
-            options);
+                document{} << "parents" << open_document << "$exists" << 1 << close_document << finalize,
+                options);
 
         for (auto doc: cursor) {
             std::string child = doc["id"].get_utf8().value.to_string();
@@ -146,7 +149,8 @@ namespace DriveFS {
                     auto found2 = DriveFS::_Object::idToObject.find(parentId.get_utf8().value.to_string());
                     printf("parent %s\n", parentId.get_utf8().value.to_string().c_str());
                     if (found2 != DriveFS::_Object::idToObject.end()) {
-                        printf("second %2d\t%s\n", (int) found2->second->attribute.st_ino, found2->second->getName().c_str());
+                        printf("second %2d\t%s\n", (int) found2->second->attribute.st_ino,
+                               found2->second->getName().c_str());
                         found2->second->addChild(found->second);
                         found->second->addParent(found2->second);
                     }
@@ -240,11 +244,11 @@ namespace DriveFS {
 //                db.bulk_write(documents);
 //            }
 
-        cursor = client[DATABASEDATA].find( document{} << "kind" << "drive#teamDrive" << finalize);
-        if(cursor.begin() != cursor.end()){
+        cursor = client[DATABASEDATA].find(document{} << "kind" << "drive#teamDrive" << finalize);
+        if (cursor.begin() != cursor.end()) {
             auto inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
             auto team_drive = _Object::buildTeamDriveHolder(inode, root);
-            for(auto doc: cursor){
+            for (auto doc: cursor) {
                 inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
                 _Object::buildTeamDrive(inode, doc, team_drive);
             }
@@ -280,11 +284,11 @@ namespace DriveFS {
             if (rootValue) {
                 auto rootId = rootValue.get_utf8().value.to_string();
                 data.update_one(
-                    document{} << "id" << rootId << finalize,
-                    document{} << "$set" << open_document
-                               << concatenate(value)
-                               << close_document << finalize,
-                    upsert
+                        document{} << "id" << rootId << finalize,
+                        document{} << "$set" << open_document
+                                   << concatenate(value)
+                                   << close_document << finalize,
+                        upsert
                 );
 
 
@@ -352,8 +356,8 @@ namespace DriveFS {
                 auto id = view["fileId"].get_utf8().value.to_string();
 
                 mongocxx::model::update_one upsert_op(
-                    document{} << "id" << id << finalize,
-                    document{} << "$set" << fileDoc << finalize
+                        document{} << "id" << id << finalize,
+                        document{} << "$set" << fileDoc << finalize
                 );
 
                 upsert_op.upsert(true);
@@ -376,12 +380,12 @@ namespace DriveFS {
             mongocxx::collection data = client[DATABASEDATA];
             mongocxx::collection settings = client[DATABASESETTINGS];
 
-            if(needs_updating) {
+            if (needs_updating) {
                 data.bulk_write(documents);
             }
             if (hasItemsToDelete) {
                 data.delete_many(
-                    document{} << "id" << open_document << "$in" << toDelete << close_document << finalize
+                        document{} << "id" << open_document << "$in" << toDelete << close_document << finalize
                 );
 
             }
@@ -460,8 +464,8 @@ namespace DriveFS {
                 auto id = view["id"].get_utf8().value.to_string();
 
                 mongocxx::model::update_one upsert_op(
-                    document{} << "id" << id << finalize,
-                    document{} << "$set" << doc << finalize
+                        document{} << "id" << id << finalize,
+                        document{} << "$set" << doc << finalize
                 );
 
                 upsert_op.upsert(true);
@@ -480,9 +484,10 @@ namespace DriveFS {
         }
 
     }
-    std::string Account::getNextId(){
+
+    std::string Account::getNextId() {
         m_event.wait();
-        if(m_id_buffer.empty()){
+        if (m_id_buffer.empty()) {
             generateIds();
         }
         const std::string id(m_id_buffer.front());
@@ -490,7 +495,8 @@ namespace DriveFS {
         m_event.signal();
         return id;
     }
-    void Account::generateIds(int_fast8_t backoff){
+
+    void Account::generateIds(int_fast8_t backoff) {
         http_client client(m_apiEndpoint, m_http_config);
         uri_builder builder("files/generateIds");
         builder.append_query("coun=10");
@@ -498,7 +504,7 @@ namespace DriveFS {
         builder.append_query("fields=ids");
 
         http_response resp = client.request(methods::GET, builder.to_string()).get();
-        if(resp.status_code() != 200){
+        if (resp.status_code() != 200) {
             LOG(ERROR) << "Failed to generate Ids: " << resp.reason_phrase();
             LOG(ERROR) << resp.extract_json(true).get();
             unsigned int sleep_time = std::pow(2, backoff);
@@ -513,20 +519,20 @@ namespace DriveFS {
 
         bsoncxx::document::value doc = bsoncxx::from_json(resp.extract_utf8string().get());
         auto view = doc.view();
-        for(auto id: view["ids"].get_array().value){
+        for (auto id: view["ids"].get_array().value) {
             m_id_buffer.push_front(id.get_utf8().value.to_string());
         }
 
     }
 
-    std::string Account::createFolderOnGDrive(std::string json, int backoff){
+    std::string Account::createFolderOnGDrive(std::string json, int backoff) {
         http_client client("https://www.googleapis.com/drive/v3/", m_http_config);
         uri_builder builder("files");
         builder.append_query("supportsTeamDrives", "true");
 //        builder.append_query("uploadType", "resumable");
 
         http_response resp = client.request(methods::POST, builder.to_string(), json, "application/json").get();
-        if(resp.status_code() != 200){
+        if (resp.status_code() != 200) {
             LOG(ERROR) << "Failed to create folders: " << resp.reason_phrase();
             LOG(ERROR) << json;
             LOG(ERROR) << resp.extract_json(true).get();
@@ -544,11 +550,11 @@ namespace DriveFS {
 
     }
 
-    GDriveObject Account::createNewChild(GDriveObject parent, const char *name, int mode, bool isFile){
+    GDriveObject Account::createNewChild(GDriveObject parent, const char *name, int mode, bool isFile) {
 
-        auto obj = _Object(inode_count.fetch_add(1, std::memory_order_acquire)+1, std::string(getNextId()), name, mode, isFile);
+        auto obj = _Object(inode_count.fetch_add(1, std::memory_order_acquire) + 1, getNextId(), name, mode, isFile);
 
-        if(!isFile){
+        if (!isFile) {
 
 
 //            web::json::value body;
@@ -558,21 +564,21 @@ namespace DriveFS {
 //            bool status = createFolderOnGDrive(body);
 
             bsoncxx::builder::stream::document doc;
-            doc     << "mimeType" << "application/vnd.google-apps.folder"
-                    << "id" << getNextId()
-                    << "name" << name
-                    << "parents" << open_array << parent->getId() << close_array;
+            doc << "mimeType" << "application/vnd.google-apps.folder"
+                << "id" << getNextId()
+                << "name" << name
+                << "parents" << open_array << parent->getId() << close_array;
 
             std::string status = createFolderOnGDrive(bsoncxx::to_json(doc));
 
 
-            if(!status.empty()){
+            if (!status.empty()) {
 
                 mongocxx::pool::entry conn = pool.acquire();
                 mongocxx::database client = conn->database(DATABASENAME);
                 mongocxx::collection db = client[DATABASEDATA];
                 db.insert_one(obj.to_bson());
-            }else{
+            } else {
                 return nullptr;
             }
 
@@ -580,29 +586,33 @@ namespace DriveFS {
         //TODO: Add a regular file to dastabase
 
         auto o = std::make_shared<_Object>(std::move(obj));
+        _Object::idToObject[o->getId()] = o;
+        _Object::inodeToObject[o->attribute.st_ino] = o;
         parent->addChild(o);
         o->addParent(parent);
+
+
         return o;
     }
 
     /*
      * trash the child object if it only has one parent left, otherwise, remove one parent of the child
      */
-    bool Account::removeChildFromParent(GDriveObject child, GDriveObject parent){
+    bool Account::removeChildFromParent(GDriveObject child, GDriveObject parent) {
 
 
-        if(child->parents.size() == 1){
-            if(trash(child)) {
+        if (child->parents.size() == 1) {
+            if (trash(child)) {
                 parent->removeChild(child);
                 return true;
             }
-        }else{
+        } else {
             child->removeParent(parent);
         }
         return false;
     }
 
-    bool Account::trash(GDriveObject file, int backoff){
+    bool Account::trash(GDriveObject file, int backoff) {
         http_client client(m_apiEndpoint, m_http_config);
         std::stringstream ss;
         ss << "files/";
@@ -610,8 +620,8 @@ namespace DriveFS {
         uri_builder builder(ss.str());
         builder.append_query("supportsTeamDrives", "true");
         http_response resp = client.request(methods::DEL, builder.to_string()).get();
-        if(resp.status_code() != 204){
-            if(resp.status_code() == 404){
+        if (resp.status_code() != 204) {
+            if (resp.status_code() == 404) {
                 return true;
             }
             LOG(ERROR) << "Failed to delete file or folder: " << resp.reason_phrase();
@@ -626,5 +636,130 @@ namespace DriveFS {
             return false;
         };
         return true;
+    }
+
+    void Account::upsertFileToDatabase(GDriveObject file) {
+        if (file) {
+            mongocxx::pool::entry conn = pool.acquire();
+            mongocxx::database client = conn->database(DATABASENAME);
+            mongocxx::collection data = client[DATABASEDATA];
+            auto status = data.update_one(
+                    document{} << "id" << file->getId() << finalize,
+                    document{} << "$set" << open_document << concatenate(file->to_bson()) << close_document << finalize,
+                    upsert
+            );
+
+        }
+    }
+
+    std::string Account::getUploadUrlForFile(GDriveObject file, std::string mimeType) {
+        http_client client("https://www.googleapis.com/upload/drive/v3", m_http_config);
+        uri_builder builder("files");
+        builder.append_query("supportsTeamDrives", "true");
+        builder.append_query("uploadType", "resumable");
+
+//        http_response resp = client.request(methods::POST, builder.to_string(), json, "application/json").get();
+
+        http_request req;
+        auto headers = req.headers();
+        headers.add("X-Upload-Content-Length", std::to_string(file->getFileSize()));
+        headers.add("X-Upload-Content-Type", mimeType);
+
+        bsoncxx::builder::stream::array parents;
+        for (auto parent: file->parents) {
+            parents << parent->getId();
+        }
+        bsoncxx::builder::stream::document doc;
+
+        doc << "id" << file->getId()
+            << "createdTime" << file->getCreatedTimeAsString()
+            << "name" << file->getName()
+            << "parents" << parents;
+
+
+
+        auto body = bsoncxx::to_json(doc.extract());
+        req.set_body(body, "application/json");
+//        json::value body;
+//        body["id"] = file->getId();
+//        body["createdTime"] = file->getCreatedTimeAsString();
+//        body["name"]
+//        req.set_body(body);
+        req.set_request_uri(builder.to_uri());
+        req.set_method(methods::POST);
+
+        auto resp = client.request(req).get();
+        std::string location;
+        if (resp.status_code() != 200) {
+            LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase();
+            LOG(ERROR) << resp.extract_utf8string(true).get();
+            LOG(INFO) << "Sleeping for 1 second before retrying";
+            sleep(1);
+            location = getUploadUrlForFile(req);
+        }else {
+            location = resp.headers()["Location"];
+        }
+
+        SFAsync([location, file]{
+
+            mongocxx::pool::entry conn = pool.acquire();
+            mongocxx::database dbclient = conn->database(DATABASENAME);
+            mongocxx::collection db = dbclient[DATABASEDATA];
+            file->m_event.wait();
+            db.update_one(document{} << "id" << file->getId() << finalize,
+                document{} << "$set" << open_document <<
+                          "uploadUrl" << location << close_document << finalize
+            );
+            file->m_event.signal();
+
+        });
+
+        return location;
+    }
+
+    std::string Account::getUploadUrlForFile(http_request req, int backoff) {
+        http_client client("https://www.googleapis.com/upload/drive/v3/files", m_http_config);
+        http_response resp = client.request(req).get();
+        if (resp.status_code() != 200) {
+            LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase();
+            LOG(ERROR) << resp.extract_json(true).get();
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for "<< sleep_time <<" second before retrying";
+            sleep(sleep_time);
+            return getUploadUrlForFile(req, backoff+1);
+        }
+        return resp.headers()["Location"];
+//        return location;
+
+    }
+
+    bool Account::upload(std::string uploadUrl, std::string filePath, size_t fileSize, std::string mimeType){
+        try {
+            concurrency::streams::istream stream = concurrency::streams::file_stream<unsigned char>::open_istream(filePath).get();
+            http_client client(uploadUrl, m_http_config);
+
+            http_request req;
+
+            req.set_body(stream, fileSize, mimeType);
+
+            req.set_method(methods::PUT);
+
+            auto resp = client.request(req).get();
+            auto status_code = resp.status_code();
+            stream.close().wait();
+            if (status_code == 200 || status_code == 201) {
+                return true;
+            } else if (status_code == 401) {
+                refresh_token();
+            } else {
+                LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase();
+                LOG(ERROR) << resp.extract_utf8string(true).get();
+                return false;
+            }
+        }catch(std::exception &e){
+            LOG(ERROR) << e.what();
+            return false;
+        }
+
     }
 }

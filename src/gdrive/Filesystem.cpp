@@ -8,6 +8,7 @@
 #include "gdrive/File.h"
 #include "FolderIO.h"
 #include <easylogging++.h>
+#include <algorithm>
 
 namespace DriveFS{
 
@@ -33,6 +34,10 @@ namespace DriveFS{
     void lookup(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
         SFAsync([=] {
             GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
+            if(!parent){
+                fuse_reply_err(req, ENOENT);
+                return;
+            }
             for (auto child: parent->children) {
                 if (child->getName().compare(name) == 0) {
                     struct fuse_entry_param e;
@@ -189,10 +194,10 @@ namespace DriveFS{
                 return;
             }
 
-            if (fi->flags & O_WRONLY || fi->flags & O_RDWR) {
-                fuse_reply_err(req, ENOSYS);
-                return;
-            }
+//            if (fi->flags & O_WRONLY || fi->flags & O_RDWR) {
+//                fuse_reply_err(req, ENOSYS);
+//                return;
+//            }
             FileIO *io = new FileIO(object, fi->flags, getAccount(req));
             fi->fh = (uintptr_t) io;
 
@@ -241,13 +246,16 @@ namespace DriveFS{
 //        auto *fsize = &(file->m_stat.st_size);
 
         off_t end = io->first_write_to_buffer + io->write_buffer_size,
-                start = io-> first_write_to_buffer,
-                current = io->first_write_to_buffer + io->last_write_to_buffer;
+        start = io-> first_write_to_buffer,
+        current = io->first_write_to_buffer + io->last_write_to_buffer;
 
         if(current != off) {
-            // not concurrent
+            // not current
             io->m_file->m_event.wait();
-            memcpy(io->write_buffer2, io->write_buffer, io->last_write_to_buffer);
+            io->m_event.wait();
+//            memcpy(io->write_buffer2, io->write_buffer, io->last_write_to_buffer);
+            std::swap(io->write_buffer, io->write_buffer2);
+            io->m_file->m_event.signal();
             off_t off2 =  io->first_write_to_buffer,
                     end2 = io->last_write_to_buffer;
             SFAsync([io, off2,end2] {
@@ -255,31 +263,39 @@ namespace DriveFS{
                 io->stream.seekp(off2);
                 io->stream.write((char *)io->write_buffer2->data(), end2);
                 io->m_file->m_event.signal();
+                io->m_event.signal();
+
             });
             io->last_write_to_buffer = 0;
             io->first_write_to_buffer = off;
             start = off; end = start + io->write_buffer_size; current = off;
         }
 
-        if(off >= start && off+size < end) {
-
-        }else {
+        if(!(off >= start && off+size < end)) {
+//        }else {
             io->m_file->m_event.wait();
-            memcpy(io->write_buffer2, io->write_buffer, io->last_write_to_buffer);
+            io->m_event.wait();
+
+//            memcpy(io->write_buffer2, io->write_buffer, io->last_write_to_buffer);
+            std::swap(io->write_buffer2, io->write_buffer);
+            io->m_file->m_event.signal();
             off_t off2 =  io->first_write_to_buffer,
                     end2 = io->last_write_to_buffer;
             SFAsync([io, off2,end2] {
 
                 io->stream.seekp(off2);
                 io->stream.write((char *)io->write_buffer2->data(), end2);
-                io->m_file->m_event.signal();
+                io->m_event.signal();
             });
 
             io->last_write_to_buffer = 0;
             io->first_write_to_buffer = off;
 
         }
-        memcpy(io->write_buffer + off - io->first_write_to_buffer, buf, size);
+        io->m_file->m_event.wait();
+        memcpy(io->write_buffer->data() + off - io->first_write_to_buffer, buf, size);
+        io->m_file->m_event.signal();
+
         io->last_write_to_buffer += size;
 
 //            io->stream.seekp(io->first_write_to_buffer);
@@ -310,8 +326,21 @@ namespace DriveFS{
     }
 
     void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        FileIO *io = (FileIO *) fi->fh;
-        delete io;
+        SFAsync([=]{
+            FileIO *io = (FileIO *) fi->fh;
+            io->release();
+
+            if(io->b_needs_uploading){
+                //sleep for 3 seconds to make sure that the filesystem has not decided to delete the file.
+                sleep(3);
+                auto file = getObjectFromInodeAndReq(req, ino);
+                if(file) {
+                    io->upload();
+                }
+            }
+
+            delete io;
+        });
         fuse_reply_err(req, 0);
     }
 
@@ -432,7 +461,11 @@ namespace DriveFS{
 
     void poll(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, struct fuse_pollhandle *ph);
 
-    void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi);
+    void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi){
+
+
+
+    }
 
     void retrieve_reply(fuse_req_t req, void *cookie, fuse_ino_t ino, off_t offset, struct fuse_bufvec *bufv);
 

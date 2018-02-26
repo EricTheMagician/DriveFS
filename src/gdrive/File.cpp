@@ -4,6 +4,10 @@
 
 #include "gdrive/File.h"
 #include "gdrive/FileIO.h"
+#include <bsoncxx/builder/stream/document.hpp>
+#include <bsoncxx/builder/basic/document.hpp>
+#include <bsoncxx/builder/basic/array.hpp>
+
 #include "adaptive_time_parser.h"
 #include "date.h"
 #include <ctime>
@@ -72,6 +76,7 @@ namespace DriveFS{
         isUploaded = false;
 
         m_id = id;
+
     }
 
     _Object::_Object(const DriveFS::_Object& that):File() {
@@ -209,6 +214,7 @@ namespace DriveFS{
 
         f.isUploaded = false;
         f.canRename = false;
+        f.trashed = false;
 
         f.attribute.st_ino = ino;
         f.attribute.st_size = 0;
@@ -217,7 +223,7 @@ namespace DriveFS{
         f.attribute.st_atim = now;
         f.attribute.st_mtim = now;
         f.attribute.st_ctim = now;
-        f.attribute.st_mode = S_IFDIR | 0x777;//S_IRWXU | S_IRWXG | S_IRWXO;
+        f.attribute.st_mode = S_IFDIR | 0x555;//S_IRWXU | S_IRWXG | S_IRWXO;
         f.attribute.st_nlink = 1;
         f.attribute.st_uid = 65534; // nobody
         f.attribute.st_gid = 65534;
@@ -238,6 +244,8 @@ namespace DriveFS{
 
     GDriveObject _Object::buildTeamDrive(ino_t ino, bsoncxx::document::view document, GDriveObject parent){
         _Object f;
+
+        f.trashed = false;
 
         f.attribute.st_ino = ino;
         f.attribute.st_size = 0;
@@ -321,7 +329,7 @@ namespace DriveFS{
         return nullptr;
     }
 
-    bsoncxx::document::value _Object::to_bson()
+    bsoncxx::document::value _Object::to_bson() const
     {
 
         bsoncxx::builder::stream::document doc;
@@ -354,6 +362,10 @@ namespace DriveFS{
         m_event.wait();
         parents.erase(std::find(parents.begin(),parents.end(), parent));
         m_event.signal();
+    }
+
+    std::string _Object::getCreatedTimeAsString() const{
+        return getRFC3339StringFromTime(attribute.st_ctim);
     }
 
 }

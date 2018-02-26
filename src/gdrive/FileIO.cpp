@@ -33,13 +33,20 @@ namespace DriveFS{
             b_needs_uploading(false),
             m_readable( (flag & 0x8000) || (flag & O_RDONLY) || (flag & O_RDWR)),
             m_writeable((flag & O_WRONLY) || (flag & O_RDWR)),
-            write_buffer(nullptr)
+            write_buffer(nullptr),
+            write_buffer2(nullptr),
+            first_write_to_buffer(0),
+            last_write_to_buffer(0),
+            m_event(1)
     {
     }
 
     FileIO::~FileIO(){
         if(write_buffer != nullptr){
             delete write_buffer;
+        }
+        if(write_buffer2 != nullptr){
+            delete write_buffer2;
         }
     }
 
@@ -107,6 +114,13 @@ namespace DriveFS{
         uint64_t spillOverPrecopy=0;
 
         DownloadItem item;
+        m_file->m_event.wait();
+        auto sz = m_file->m_buffers->size();
+        if(sz <= chunkStart){
+            auto count = (m_file->getFileSize() + write_buffer_size)/write_buffer_size;
+            m_file->m_buffers->resize(count);
+        }
+        m_file->m_event.signal();
         auto buffer = new std::vector<unsigned char>(size, 0);
         if ( (item = m_file->m_buffers->at(chunkStart).lock()) ) {
 
@@ -262,6 +276,39 @@ namespace DriveFS{
         }
     }
 
+    void FileIO::upload(){
+        m_account->upsertFileToDatabase(m_file);
+        std::string uploadUrl = m_account->getUploadUrlForFile(m_file);
+        bool status = m_account->upload(uploadUrl, f_name + ".released", m_file->getFileSize());
+    }
+
+    void FileIO::release(){
+
+        if(last_write_to_buffer >0 ){
+            stream.write((char *) write_buffer->data(),last_write_to_buffer);
+            last_write_to_buffer = 0;
+        }
+        stream.close();
+
+        if(b_needs_uploading){
+
+            fs::path released;
+            if(f_name.empty()) {
+                released = fs::path(m_file->getId());
+            }else{
+                released = fs::path(f_name);
+            }
+            released += ".released";
+            try {
+                fs::rename(f_name, released);
+            }catch(std::exception &e){
+                LOG(ERROR) << e.what() << std::endl << m_file->getName() << "\t" << m_file->getId();
+            }
+        }
+
+
+
+    }
 
 
 }

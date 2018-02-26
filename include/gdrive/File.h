@@ -54,7 +54,8 @@ namespace DriveFS {
         inline bool getIsUploaded() const{return isUploaded;}
         void trash();
         GDriveObject findChildByName( const char *name) const ;
-        bsoncxx::document::value to_bson();
+        bsoncxx::document::value to_bson() const;
+        std::string getCreatedTimeAsString() const;
 
     public:
         std::vector<GDriveObject> parents, children;

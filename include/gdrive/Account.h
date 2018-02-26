@@ -11,6 +11,7 @@
 #include <boost/filesystem.hpp>
 #include <bsoncxx/builder/basic/kvp.hpp>
 #include <bsoncxx/builder/stream/document.hpp>
+#include <bsoncxx/builder/stream/array.hpp>
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/array.hpp>
 #include <bsoncxx/document/value.hpp>
@@ -48,6 +49,10 @@ namespace DriveFS {
 
         GDriveObject createNewChild(GDriveObject parent, const char *name, int mode, bool isFile);
         bool removeChildFromParent(GDriveObject child, GDriveObject parent);
+        void upsertFileToDatabase(GDriveObject file);
+        std::string getUploadUrlForFile(GDriveObject file, std::string mimeType = "application/octet-stream");
+        bool upload(std::string uploadUrl, std::string filePath, size_t fileSize, std::string mimeType = "application/octet-stream");
+        std::optional<int64_t> getResumableUploadPoint(std::string url, size_t fileSize);
     protected:
         void run_internal() override;
         void loadFilesAndFolders() override;
@@ -56,7 +61,7 @@ namespace DriveFS {
         void getTeamDrives(int backoff=0);
         void linkParentsAndChildren();
         std::string getNextId();
-
+        std::string getUploadUrlForFile(http_request, int backoff=1);
         void generateIds(int_fast8_t backoff=0);
         std::string createFolderOnGDrive(const std::string json, int backoff=0);
         bool trash(GDriveObject file, int backoff=0);

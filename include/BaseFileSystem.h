@@ -7,6 +7,7 @@
 #include <future>
 #include <functional>
 #include <type_traits>
+#include <easylogging++.h>
 
 template< class Function, class... Args>
 std::future<typename std::result_of<Function(Args...)>::type> SFAsync( Function&& f, Args&&... args )
@@ -19,6 +20,7 @@ std::future<typename std::result_of<Function(Args...)>::type> SFAsync( Function&
     std::thread t(std::move(task));
     t.detach();
     return ret;
+
 }
 int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
                              off_t off, size_t maxsize);

@@ -14,7 +14,6 @@
 
 
 #include "gdrive/Account.h"
-#include "gdrive/File.h"
 #include "DownloadBuffer.h"
 #include <iostream>
 #include <fstream>
@@ -23,6 +22,7 @@
 #include <future>
 #include <string_view>
 #include <atomic>
+#include <autoresetevent.h>
 
 #define MAX_CACHE_SIZE  (768*1024*1024) //(768*1024*1024) //2GB
 #define BLOCK_DOWNLOAD_SIZE 1048576L //1MB
@@ -67,8 +67,7 @@ namespace DriveFS {
     public:
 
         std::vector<unsigned char> * getFromCache(const size_t &size, const off_t &off);
-
-        Account *m_account;
+        void upload();
 
         std::string f_name;
         GDriveObject m_file;
@@ -81,11 +80,12 @@ namespace DriveFS {
         std::vector<unsigned char> *write_buffer, *write_buffer2;
         off_t last_write_to_buffer, first_write_to_buffer;
         std::fstream stream;
+        AutoResetEvent m_event;
 
     private:
-        void download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
+        Account *m_account;
 
-        void upload();
+        void download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
 
         void clearFileFromCache();
 
