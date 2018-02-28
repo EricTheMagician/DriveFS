@@ -53,9 +53,11 @@ namespace DriveFS {
         void updatLastAccessToCache(uint64_t chunkNumber);
         inline bool getIsUploaded() const{return isUploaded;}
         void trash();
+        std::string md5() const { return md5Checksum; };
         GDriveObject findChildByName( const char *name) const ;
         bsoncxx::document::value to_bson() const;
         std::string getCreatedTimeAsString() const;
+
 
     public:
         std::vector<GDriveObject> parents, children;

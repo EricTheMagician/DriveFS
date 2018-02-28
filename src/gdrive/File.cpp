@@ -52,7 +52,8 @@ namespace DriveFS{
             isFolder(!isFile),
             isTrashable(true), canRename(true),
             m_buffers(nullptr),
-            heap_handles(nullptr)
+            heap_handles(nullptr),
+            trashed(false)
     {
         memset(&attribute, 0, sizeof(struct stat));
         if(isFile) {
@@ -65,6 +66,7 @@ namespace DriveFS{
             attribute.st_mode = mode | S_IFDIR;
         }
         attribute.st_ino = ino;
+        isUploaded = false;
 
         struct timespec now{time(nullptr),0};
         attribute.st_ctim = now;
@@ -134,6 +136,7 @@ namespace DriveFS{
         isUploaded(true)
     {
         attribute.st_ino = ino;
+        attribute.st_blksize = 1;
         m_id = document["id"].get_utf8().value.to_string();
 
         auto f = document["mimeType"];
@@ -141,23 +144,34 @@ namespace DriveFS{
             isFolder = true;
             attribute.st_mode = S_IFDIR | S_IXUSR | S_IXGRP | S_IXOTH;
             attribute.st_size = 4096;
-            attribute.st_blocks = 1;
+            attribute.st_blocks = 0;
+            isUploaded = true;
         }else{
             isFolder = false;
             attribute.st_mode = S_IFREG | S_IXUSR | S_IXGRP | S_IXOTH;
             auto sz = document["size"];
             if(sz){
-                attribute.st_size = std::atoll(sz.get_utf8().value.to_string().c_str());
+                attribute.st_size = std::strtoll(sz.get_utf8().value.to_string().c_str(), nullptr, 10);
             }else{
                 sz = document["quotaBytesUsed"];
                 if(sz){
-                    attribute.st_size = std::atoll(sz.get_utf8().value.to_string().c_str());
-                    attribute.st_blocks = attribute.st_size / S_BLKSIZE  + 1;
+                    attribute.st_size = std::strtoll(sz.get_utf8().value.to_string().c_str(), nullptr, 10);
                 }else {
                     attribute.st_size = 0;
-                    attribute.st_blocks = 0;
                 }
+
             }
+            attribute.st_blocks = attribute.st_size / S_BLKSIZE + std::min<int64_t>(attribute.st_size % S_BLKSIZE,1);
+            auto md5 = document["md5Checksum"];
+            if(md5){
+                isUploaded = true;
+                md5Checksum = md5.get_utf8().value.to_string();
+            }else if(attribute.st_size == 0){
+                isUploaded = true;
+            }else{
+                isUploaded = false;
+            }
+
             createVectorsForBuffers();
 
         }
@@ -348,6 +362,12 @@ namespace DriveFS{
         doc << "name" << m_name ;
         doc << "modifiedTime" << getRFC3339StringFromTime(attribute.st_mtim);
         doc << "createdTime" << getRFC3339StringFromTime(attribute.st_ctim);
+        doc << "trashed" << trashed;
+        bsoncxx::builder::stream::array array;
+        for(auto parent: parents){
+            array << parent->getId();
+        }
+        doc << "parents" << array;
 
         return doc.extract();
     }

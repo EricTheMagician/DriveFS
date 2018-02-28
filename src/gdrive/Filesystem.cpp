@@ -208,11 +208,13 @@ namespace DriveFS{
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
-        FileIO *io = (FileIO *) fi->fh;
-        auto buf = io->read(size, off);
+        SFAsync([=]{
+            FileIO * io = (FileIO *) fi->fh;
+            auto buf = io->read(size, off);
 
-        fuse_reply_buf(req, (const char *) buf->data(), buf->size());
-        delete buf;
+            fuse_reply_buf(req, (const char *) buf->data(), buf->size());
+            delete buf;
+        });
     }
 
     void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi){
@@ -384,8 +386,8 @@ namespace DriveFS{
 
     void statfs(fuse_req_t req, fuse_ino_t ino){
         struct statvfs stat{
-            .f_bsize = 65536,
-            .f_frsize=  65536,
+            .f_bsize = 1,
+            .f_frsize=  65536*4,
             .f_blocks=  1000000,
             .f_bfree=  1000000,
             .f_bavail=  1000000,
@@ -400,9 +402,75 @@ namespace DriveFS{
 
     void setxattr(fuse_req_t req, fuse_ino_t ino, const char *name, const char *value, size_t size, int flags);
 
-    void getxattr(fuse_req_t req, fuse_ino_t ino, const char *name, size_t size);
+    void getxattr(fuse_req_t req, fuse_ino_t ino, const char *name, size_t size){
+        auto object = getObjectFromInodeAndReq(req, ino);
+        if(object){
+            std::string value;
+            if(strcmp(name, "id") == 0){
+                value = object->getId();
+            }
 
-    void listxattr(fuse_req_t req, fuse_ino_t ino, size_t size);
+            else if(!object->getIsFolder()) {
+                if (strcmp(name, "md5Checksum") == 0) {
+                    value = object->md5();
+                    if(value.empty()){
+                        value = "not available";
+                    }
+                }
+            }
+
+            if(!value.empty()){
+                if(size >= value.size()+1){
+                    fuse_reply_buf(req, value.c_str(), value.size());
+                }else{
+                    fuse_reply_xattr(req, value.size()+1);
+                }
+                return;
+
+            }
+
+
+        }
+        fuse_reply_err(req, ENOENT);
+    }
+
+    void listxattr(fuse_req_t req, fuse_ino_t ino, size_t size){
+        auto object = getObjectFromInodeAndReq(req, ino);
+        if(object){
+
+            if(object->getIsFolder()){
+                constexpr int needednumberofBytes = 3;
+                if(size >= needednumberofBytes) {
+                    char buf[needednumberofBytes] = "id";
+                    fuse_reply_buf(req, buf, needednumberofBytes);
+                }else if(size == 0){
+                    fuse_reply_xattr(req, needednumberofBytes);
+                }else {
+                    fuse_reply_err(req, ERANGE);
+                }
+                return;
+                fuse_reply_err(req, 0);
+            }else{
+                //md5Checksum
+                constexpr int needednumberofBytes = 15;
+                if(size >= needednumberofBytes){
+                    char buf[needednumberofBytes];
+                    memset(buf, 0, needednumberofBytes);
+                    strcpy(buf, "md5Checksum"); //0-10 cha
+                    strcpy(&buf[12], "id"); //12,13 char
+                    fuse_reply_buf(req, buf, needednumberofBytes);
+                }else if(size == 0){
+                    fuse_reply_xattr(req, needednumberofBytes);
+                }else{
+                    fuse_reply_err(req, ERANGE);
+                }
+                return;
+            }
+
+        }
+
+        fuse_reply_err(req, ENOENT);
+    }
 
     void removexattr(fuse_req_t req, fuse_ino_t ino, const char *name);
 
@@ -499,6 +567,8 @@ namespace DriveFS{
         ops.flush = flush;
         ops.mkdir = mkdir;
         ops.rmdir = rmdir;
+        ops.listxattr = listxattr;
+        ops.getxattr = getxattr;
 
         return ops;
     }

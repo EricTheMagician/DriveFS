@@ -7,6 +7,8 @@
 #include <cpprest/filestream.h>
 #include <easylogging++.h>
 #include <pplx/pplxtasks.h>
+#include <gdrive/FileIO.h>
+#include <regex>
 
 //using namespace utility;
 //using namespace web;
@@ -141,16 +143,11 @@ namespace DriveFS {
         for (auto doc: cursor) {
             std::string child = doc["id"].get_utf8().value.to_string();
             auto found = DriveFS::_Object::idToObject.find(child);
-            printf("child %s\n", child.c_str());
             if (found != DriveFS::_Object::idToObject.end()) {
-                printf("first %2d\t%s\n", (int) found->second->attribute.st_ino, found->second->getName().c_str());
                 bsoncxx::array::view parents = doc["parents"].get_array();
                 for (auto parentId : parents) {
                     auto found2 = DriveFS::_Object::idToObject.find(parentId.get_utf8().value.to_string());
-                    printf("parent %s\n", parentId.get_utf8().value.to_string().c_str());
                     if (found2 != DriveFS::_Object::idToObject.end()) {
-                        printf("second %2d\t%s\n", (int) found2->second->attribute.st_ino,
-                               found2->second->getName().c_str());
                         found2->second->addChild(found->second);
                         found->second->addParent(found2->second);
                     }
@@ -180,6 +177,8 @@ namespace DriveFS {
 
         auto cursor = db.find(document{} << "parents" << open_document << "$exists" << 1 << close_document << finalize);
         mongocxx::bulk_write documents;
+        bsoncxx::builder::stream::array toDelete;
+        bool hasItemsToDelete = false;
         for (auto doc: cursor) {
 //                    DriveFS::_Object object;
 
@@ -192,10 +191,37 @@ namespace DriveFS {
 
             auto object = std::make_shared<DriveFS::_Object>(inode, doc);
 
+            if(!object->getIsFolder() && !object->getIsUploaded()){
+
+                FileIO *io = new FileIO(object, 0, this);
+                if( io->validateCachedFileForUpload(true) ){
+                    auto ele = doc["uploadUrl"];
+//                    LOG(INFO) << "Resuming upload of: " << object->getName();
+                    if(ele){
+                        std::string url = ele.get_utf8().value.to_string();
+                        SFAsync([io, url] {
+                            io->resumeFileUploadFromUrl(url);
+                            delete io;
+                        });
+                    }else{
+                        SFAsync( [io]{
+                            io->upload();
+                            delete io;
+                        });
+                    }
+                }else{
+                    delete io;
+                    toDelete << object->getId();
+                    hasItemsToDelete = true;
+                    continue;
+                }
+
+            }
 
             std::string id = object->getId();
             DriveFS::_Object::idToObject[id] = object;
             DriveFS::_Object::inodeToObject[inode] = object;
+
 
 //                if(object->isUploaded()) {
 //                        idToObject[id] = object;
@@ -556,13 +582,6 @@ namespace DriveFS {
 
         if (!isFile) {
 
-
-//            web::json::value body;
-//            body["mimeType"] = json::value::string("application/vnd.google-apps.folder");
-//            body["mimeType"] = json::value::string("application/vnd.google-apps.folder");
-
-//            bool status = createFolderOnGDrive(body);
-
             bsoncxx::builder::stream::document doc;
             doc << "mimeType" << "application/vnd.google-apps.folder"
                 << "id" << getNextId()
@@ -573,7 +592,6 @@ namespace DriveFS {
 
 
             if (!status.empty()) {
-
                 mongocxx::pool::entry conn = pool.acquire();
                 mongocxx::database client = conn->database(DATABASENAME);
                 mongocxx::collection db = client[DATABASEDATA];
@@ -583,14 +601,12 @@ namespace DriveFS {
             }
 
         }
-        //TODO: Add a regular file to dastabase
 
         auto o = std::make_shared<_Object>(std::move(obj));
         _Object::idToObject[o->getId()] = o;
         _Object::inodeToObject[o->attribute.st_ino] = o;
         parent->addChild(o);
         o->addParent(parent);
-
 
         return o;
     }
@@ -639,16 +655,22 @@ namespace DriveFS {
     }
 
     void Account::upsertFileToDatabase(GDriveObject file) {
-        if (file) {
-            mongocxx::pool::entry conn = pool.acquire();
-            mongocxx::database client = conn->database(DATABASENAME);
-            mongocxx::collection data = client[DATABASEDATA];
-            auto status = data.update_one(
-                    document{} << "id" << file->getId() << finalize,
-                    document{} << "$set" << open_document << concatenate(file->to_bson()) << close_document << finalize,
-                    upsert
-            );
 
+        if (file) {
+            try {
+                mongocxx::pool::entry conn = pool.acquire();
+                mongocxx::database client = conn->database(DATABASENAME);
+                mongocxx::collection data = client[DATABASEDATA];
+                auto status = data.update_one(
+                        document{} << "id" << file->getId() << finalize,
+                        document{} << "$set" << open_document << concatenate(file->to_bson()) << close_document
+                                   << finalize,
+                        upsert
+                );
+                status;
+            }catch(std::exception &e){
+                LOG(ERROR) << e.what();
+            }
         }
     }
 
@@ -661,7 +683,7 @@ namespace DriveFS {
 //        http_response resp = client.request(methods::POST, builder.to_string(), json, "application/json").get();
 
         http_request req;
-        auto headers = req.headers();
+        auto &headers = req.headers();
         headers.add("X-Upload-Content-Length", std::to_string(file->getFileSize()));
         headers.add("X-Upload-Content-Type", mimeType);
 
@@ -733,14 +755,21 @@ namespace DriveFS {
 
     }
 
-    bool Account::upload(std::string uploadUrl, std::string filePath, size_t fileSize, std::string mimeType){
+    bool Account::upload(std::string uploadUrl, std::string filePath, size_t fileSize, int64_t start, std::string mimeType){
         try {
             concurrency::streams::istream stream = concurrency::streams::file_stream<unsigned char>::open_istream(filePath).get();
             http_client client(uploadUrl, m_http_config);
 
             http_request req;
-
-            req.set_body(stream, fileSize, mimeType);
+            if(start == 0) {
+                req.set_body(stream, fileSize, mimeType);
+            }else{
+                stream.seek(start);
+                req.set_body(stream, fileSize-start, mimeType);
+                std::stringstream ss;
+                ss << "bytes " << start <<"-" << fileSize-1 << "/" << fileSize;
+                req.headers()["Content-Range"] = ss.str();
+            }
 
             req.set_method(methods::PUT);
 
@@ -762,4 +791,48 @@ namespace DriveFS {
         }
 
     }
+
+    std::optional<int64_t> Account::getResumableUploadPoint(std::string url, size_t fileSize, int backoff){
+
+        http_client client(url, m_http_config);
+        http_request request;
+        request.set_method(methods::PUT);
+        http_headers &headers = request.headers();
+        std::stringstream ss;
+        ss <<"bytes */"<<fileSize;
+        headers.add("Content-Range", ss.str());
+
+        http_response response = client.request(request).get();
+        int status_code = response.status_code();
+        if(status_code == 404){
+            return std::nullopt;
+        }
+        if(status_code == 308){
+            headers = response.headers();
+            const std::string range = headers["Range"];
+            const std::regex numbers ("-(\\d+)", std::regex_constants::icase);
+            std::smatch match;
+            if(std::regex_search(range, match, numbers) && match.size() > 1){
+                return std::optional<int64_t>((int64_t ) std::strtoll(match.str(1).c_str(), nullptr, 10) + 1);
+            }else{
+                return std::optional<int64_t>(0);
+            }
+        }
+        if(status_code >= 500 || status_code == 400){
+            LOG(ERROR) << "Failed to get start point: " << response.reason_phrase();
+            LOG(ERROR) << response.extract_utf8string(true).get();
+//            LOG(ERROR) << response.headers()[""]
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 5) {
+                return getResumableUploadPoint(url, fileSize, backoff);
+            }
+
+        }
+
+        return std::nullopt;
+
+    }
+
 }

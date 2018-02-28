@@ -21,8 +21,6 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
 
 }
 
-const constexpr int max_yield_count = 1000000;
-
 namespace DriveFS{
     size_t FileIO::write_buffer_size = BLOCK_DOWNLOAD_SIZE;
     FileIO::FileIO(GDriveObject object, int flag, Account *account):
@@ -39,6 +37,7 @@ namespace DriveFS{
             last_write_to_buffer(0),
             m_event(1)
     {
+        setFileName();
     }
 
     FileIO::~FileIO(){
@@ -240,10 +239,13 @@ namespace DriveFS{
 
     }
 
-    void FileIO::open(){
+    void FileIO::setFileName(){
         fs::path file_location(CACHEPATH);
         file_location /= m_file->getId();
         f_name = file_location.string();
+    }
+
+    void FileIO::open(){
         b_is_cached = true;
 
         if(m_writeable){
@@ -260,7 +262,7 @@ namespace DriveFS{
 //                return;
 //            }
 
-            stream.open(file_location.string());
+            stream.open(f_name.c_str());
         }
 
         return;
@@ -310,5 +312,30 @@ namespace DriveFS{
 
     }
 
-
+    bool FileIO::validateCachedFileForUpload(bool deleteCachedFile){
+        auto path = fs::path(f_name + ".released");
+        if(fs::exists(path)){
+            if( fs::file_size(path) == m_file->getFileSize()) {
+                return true;
+            }
+        }
+        path = fs::path(f_name);
+        if(deleteCachedFile){
+            if(fs::exists(path)){
+                fs::remove(path);
+            }
+        }
+        return false;
+    }
+    bool FileIO::resumeFileUploadFromUrl(std::string url){
+        auto start = m_account->getResumableUploadPoint(url, m_file->getFileSize());
+        LOG(INFO) << "Resuming upload of: " << m_file->getName();
+        if(start){
+            LOG(INFO) << "Starting from: " << start.value() << " / " << m_file->getFileSize() << "  " << (int) ((double) start.value() / (double) m_file->getFileSize() * 100.0) << "%";
+            m_account->upload(url, f_name + ".released", m_file->getFileSize(), start.value());
+        }else{
+            LOG(INFO) << "Starting from: 0";
+            upload();
+        }
+    }
 }

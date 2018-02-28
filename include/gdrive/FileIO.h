@@ -55,6 +55,18 @@ namespace DriveFS {
 
         void release();
 
+
+        /*
+         * \brief A cache is valid if the file has been released.
+         * \param delete: bool delete temp file if the cache is invalid
+         */
+        bool validateCachedFileForUpload(bool deleteCachedFile = false);
+
+        /*
+         * \brief Resume file upload from this file;
+         */
+        bool resumeFileUploadFromUrl(std::string url);
+
         void create_write_buffer();
         void create_write_buffer2();
 
@@ -88,6 +100,7 @@ namespace DriveFS {
         void download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
 
         void clearFileFromCache();
+        void setFileName();
 
 
     };
