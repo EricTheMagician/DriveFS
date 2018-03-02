@@ -71,6 +71,7 @@ namespace DriveFS {
 
         std::string m_newStartPageToken="";
         std::atomic<ino_t> inode_count = 1;
+        std::chrono::system_clock::time_point m_token_expires_at;
     };
 };
 

@@ -29,7 +29,9 @@ namespace DriveFS {
         "https://www.googleapis.com/oauth2/v4/token",
         "http://localhost:7878",
         GDRIVE_OAUTH_SCOPE),
-         m_id_buffer(10) {
+         m_id_buffer(10),
+         m_token_expires_at(std::chrono::system_clock::now())
+                                 {
 
         upsert.upsert(true);
         find_and_upsert.upsert(true);
@@ -71,7 +73,12 @@ namespace DriveFS {
     void Account::refresh_token(int backoff) {
         m_event.wait();
         try {
-            m_oauth2_config.token_from_refresh().get();
+            if(std::chrono::system_clock::now() >= m_token_expires_at ) {
+                LOG(INFO) << "Refreshing access tokens";
+                m_oauth2_config.token_from_refresh().get();
+                m_token_expires_at = std::chrono::system_clock::now() + std::chrono::seconds(m_oauth2_config.token().expires_in()) - std::chrono::minutes(2);
+            }
+
         } catch (std::exception &e) {
             m_event.signal();
             LOG(ERROR) << "Failed to refresh token";
@@ -287,6 +294,7 @@ namespace DriveFS {
 
     void Account::getFilesAndFolders(std::string nextPageToken, int backoff) {
 
+        refresh_token();
         LOG(INFO) << "Getting updated list of files and folders";
 
         http_client client(m_apiEndpoint, m_http_config);
@@ -441,6 +449,8 @@ namespace DriveFS {
     }
 
     void Account::getTeamDrives(int backoff) {
+        refresh_token();
+
         // load team drive folders
         http_client td_client(m_apiEndpoint, m_http_config);
 
@@ -523,6 +533,8 @@ namespace DriveFS {
     }
 
     void Account::generateIds(int_fast8_t backoff) {
+        refresh_token();
+
         http_client client(m_apiEndpoint, m_http_config);
         uri_builder builder("files/generateIds");
         builder.append_query("coun=10");
@@ -552,6 +564,9 @@ namespace DriveFS {
     }
 
     std::string Account::createFolderOnGDrive(std::string json, int backoff) {
+        refresh_token();
+
+
         http_client client("https://www.googleapis.com/drive/v3/", m_http_config);
         uri_builder builder("files");
         builder.append_query("supportsTeamDrives", "true");
@@ -629,6 +644,8 @@ namespace DriveFS {
     }
 
     bool Account::trash(GDriveObject file, int backoff) {
+        refresh_token();
+
         http_client client(m_apiEndpoint, m_http_config);
         std::stringstream ss;
         ss << "files/";
@@ -675,6 +692,8 @@ namespace DriveFS {
     }
 
     std::string Account::getUploadUrlForFile(GDriveObject file, std::string mimeType) {
+        refresh_token();
+
         http_client client("https://www.googleapis.com/upload/drive/v3", m_http_config);
         uri_builder builder("files");
         builder.append_query("supportsTeamDrives", "true");
@@ -740,6 +759,8 @@ namespace DriveFS {
     }
 
     std::string Account::getUploadUrlForFile(http_request req, int backoff) {
+        refresh_token();
+
         http_client client("https://www.googleapis.com/upload/drive/v3/files", m_http_config);
         http_response resp = client.request(req).get();
         if (resp.status_code() != 200) {
@@ -793,6 +814,7 @@ namespace DriveFS {
     }
 
     std::optional<int64_t> Account::getResumableUploadPoint(std::string url, size_t fileSize, int backoff){
+        refresh_token();
 
         http_client client(url, m_http_config);
         http_request request;
