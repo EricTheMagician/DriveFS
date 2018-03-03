@@ -25,6 +25,7 @@ namespace DriveFS {
     public:
         static GDriveObject buildRoot(bsoncxx::document::view document);
         static void updateInode(ino_t ino, bsoncxx::document::view document);
+        void updateInode(bsoncxx::document::view document);
         _Object(ino_t ino, bsoncxx::document::view document); // default object creation
         _Object(ino_t ino, const std::string &id, const char *name, mode_t mode, bool isFile);
         _Object(const DriveFS::_Object&);

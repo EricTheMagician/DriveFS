@@ -182,7 +182,18 @@ namespace DriveFS{
 
     void symlink(fuse_req_t req, const char *link, fuse_ino_t parent, const char *name);
 
-    void rename(fuse_req_t req, fuse_ino_t parent, const char *name, fuse_ino_t newparent, const char *newname, unsigned int flags);
+    void rename(fuse_req_t req, fuse_ino_t parent_ino, const char *name, fuse_ino_t newparent_ino, const char *newname, unsigned int flags){
+        auto parent = getObjectFromInodeAndReq(req, parent_ino);
+        auto child = parent->findChildByName(name);
+
+        if(parent_ino != newparent_ino){
+            parent->removeChild(child);
+            auto newParent = getObjectFromInodeAndReq(req, newparent_ino);
+            newParent->addChild(child);
+        }
+
+        //todo finish rename
+    }
 
     void link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname);
 

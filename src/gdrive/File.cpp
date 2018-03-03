@@ -295,7 +295,63 @@ namespace DriveFS{
         m_event.signal();
     }
 
-    void _Object::updateInode(ino_t ino, bsoncxx::document::view document) {
+    void _Object::updateInode(bsoncxx::document::view document) {
+        attribute.st_blksize = 1;
+
+        auto f = document["mimeType"];
+        if(f.get_utf8().value == "application/vnd.google-apps.folder"){
+            isFolder = true;
+            attribute.st_size = 4096;
+            attribute.st_blocks = 0;
+            isUploaded = true;
+        }else{
+            isFolder = false;
+            attribute.st_mode = S_IFREG | S_IXUSR | S_IXGRP | S_IXOTH;
+            auto sz = document["size"];
+            if(sz){
+                attribute.st_size = std::strtoll(sz.get_utf8().value.to_string().c_str(), nullptr, 10);
+            }else{
+                sz = document["quotaBytesUsed"];
+                if(sz){
+                    attribute.st_size = std::strtoll(sz.get_utf8().value.to_string().c_str(), nullptr, 10);
+                }else {
+                    attribute.st_size = 0;
+                }
+
+            }
+            attribute.st_blocks = attribute.st_size / S_BLKSIZE + std::min<int64_t>(attribute.st_size % S_BLKSIZE,1);
+            auto md5 = document["md5Checksum"];
+            if(md5){
+                isUploaded = true;
+                md5Checksum = md5.get_utf8().value.to_string();
+            }else if(attribute.st_size == 0){
+                isUploaded = true;
+            }else{
+                isUploaded = false;
+            }
+
+        }
+
+        auto maybeCapabilities = document["capabilities"];
+        if(maybeCapabilities){
+            auto capabilities = maybeCapabilities.get_document().value;
+            isTrashable = capabilities["canTrash"].get_bool();
+            canRename = capabilities["canRename"].get_bool();
+            if(capabilities["canDownload"].get_bool()){
+                attribute.st_mode |= S_IRUSR | S_IRGRP | S_IROTH;
+            }
+            if(capabilities["canEdit"].get_bool()){
+                attribute.st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;
+            }
+        }
+        trashed = document["trashed"].get_bool().value;
+        m_name = document["name"].get_utf8().value.to_string();
+        attribute.st_mtim = getTimeFromRFC3339String(document["modifiedTime"].get_utf8().value.to_string());
+        attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value.to_string());
+        attribute.st_atim = attribute.st_mtim;
+        attribute.st_nlink = 1;
+        attribute.st_uid = 65534; // nobody
+        attribute.st_gid = 65534;
 
     }
 
