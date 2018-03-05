@@ -55,6 +55,7 @@ namespace DriveFS {
     }
 
     Account::Account(const std::string &at, const std::string &rt) : Account() {
+        m_refresh_token = rt;
         auto token = m_oauth2_config.token();
         m_oauth2_config.set_bearer_auth(true);
         token.set_access_token(at);
@@ -76,6 +77,9 @@ namespace DriveFS {
             if(std::chrono::system_clock::now() >= m_token_expires_at ) {
                 LOG(INFO) << "Refreshing access tokens";
                 m_oauth2_config.token_from_refresh().get();
+                auto token = m_oauth2_config.token();
+                token.set_refresh_token(m_refresh_token);
+                m_oauth2_config.set_token(token);
                 m_token_expires_at = std::chrono::system_clock::now() + std::chrono::seconds(m_oauth2_config.token().expires_in()) - std::chrono::minutes(2);
             }
 
@@ -101,7 +105,7 @@ namespace DriveFS {
         mongocxx::pool::entry conn = pool.acquire();
         mongocxx::database client = conn->database(DATABASENAME);
         mongocxx::collection db = client[DATABASESETTINGS];
-        auto token = m_oauth2_config.token();
+        auto &token = m_oauth2_config.token();
         mongocxx::options::update options;
         options.upsert(true);
         db.update_one(document{} << "name" << GDRIVETOKENNAME << finalize,
@@ -110,6 +114,7 @@ namespace DriveFS {
                                  << finalize,
                       options
         );
+        m_refresh_token = token.refresh_token();
 
 
         getFilesAndFolders();

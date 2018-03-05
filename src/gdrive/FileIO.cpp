@@ -114,10 +114,16 @@ namespace DriveFS{
 
         DownloadItem item;
         m_file->m_event.wait();
-        auto sz = m_file->m_buffers->size();
-        if(sz <= chunkStart){
+        if(m_file->m_buffers == nullptr){
             auto count = (m_file->getFileSize() + write_buffer_size)/write_buffer_size;
-            m_file->m_buffers->resize(count);
+            m_file->m_buffers = new std::vector<WeakBuffer>(count);
+
+        }else {
+            auto sz = m_file->m_buffers->size();
+            if (sz <= chunkStart) {
+                auto count = (m_file->getFileSize() + write_buffer_size) / write_buffer_size;
+                m_file->m_buffers->resize(count);
+            }
         }
         m_file->m_event.signal();
         auto buffer = new std::vector<unsigned char>(size, 0);

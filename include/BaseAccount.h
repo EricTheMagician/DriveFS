@@ -64,6 +64,7 @@ protected:
     struct fuse_session *m_fuse_session;
     AutoResetEvent m_event;
     std::string m_key;
+    std::string m_refresh_token;
 
 };
 
