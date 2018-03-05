@@ -46,14 +46,17 @@ public:
 template <class file_t>
 class PriorityCache{
     const size_t maxCacheSize;
-
 public:
-    PriorityCache(size_t size):cacheSize(0), maxCacheSize(size), cache(new boost::heap::fibonacci_heap<DownloadItem>), sema(1){
+    PriorityCache(size_t block_download_size, size_t max_cache_size):
+            cacheSize(0), maxCacheSize(max_cache_size),
+            cache(new boost::heap::fibonacci_heap<DownloadItem>), sema(1),
+            m_block_download_size(block_download_size){
     }
     void insert(file_t file, uint64_t chunkNumber, size_t size, DownloadItem item){
         sema.wait();
         auto handle = cache->push(item);
-        (*file->heap_handles)[chunkNumber] = handle;
+        file->create_heap_handles(m_block_download_size);
+        (*(file->heap_handles))[chunkNumber] = handle;
         auto newCacheSize = cacheSize.fetch_add(size, std::memory_order_release) + size;
         sema.signal();
     }
@@ -75,7 +78,9 @@ public:
 private:
     boost::heap::fibonacci_heap<DownloadItem> *cache; // queue storing cached data by last access
     std::atomic<size_t> cacheSize; // total bytes of data in cache
+    const size_t m_block_download_size;
     AutoResetEvent sema;
+
 };
 
 #endif //DRIVEFS_DOWNLOADBUFFER_H

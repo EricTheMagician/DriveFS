@@ -48,7 +48,6 @@ namespace DriveFS {
             attribute.st_nlink++;
             addRelationship(std::move(child), children);
         };
-        inline size_t getFileSize() const { return attribute.st_size; }
 
         void createVectorsForBuffers();
         void updatLastAccessToCache(uint64_t chunkNumber);
@@ -67,8 +66,8 @@ namespace DriveFS {
 
     protected:
         _Object(); // used for creating a default object when creating root folders
-
-        void addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship);
+        void updateProperties(bsoncxx::document::view document);
+        bool addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship);
         bool trashed, starred;
         std::string m_id, mime_type, selflink, md5Checksum;
         uint_fast64_t version;

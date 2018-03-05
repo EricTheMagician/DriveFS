@@ -270,6 +270,10 @@ namespace DriveFS {
                                 }
                             }
                         }
+
+                        // notify the kernel that the inode is invalid.
+                        fuse_lowlevel_notify_inval_inode(this->fuse_session, file->attribute.st_ino, -1, 0);
+
                     }else{
                         auto inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
                         auto file = std::make_shared<DriveFS::_Object>(inode, view);
@@ -1029,7 +1033,7 @@ namespace DriveFS {
                 return std::optional<int64_t>(0);
             }
         }
-        if(status_code >= 500 || status_code == 400){
+        if(status_code >= 400 ){
             LOG(ERROR) << "Failed to get start point: " << response.reason_phrase();
             LOG(ERROR) << response.extract_utf8string(true).get();
 //            LOG(ERROR) << response.headers()[""]
@@ -1037,12 +1041,38 @@ namespace DriveFS {
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
             if (backoff <= 5) {
-                return getResumableUploadPoint(url, fileSize, backoff);
+                return getResumableUploadPoint(url, fileSize, backoff+1);
             }
 
         }
 
         return std::nullopt;
+
+    }
+
+    bool Account::updateObjectProperties(std::string id, std::string json, int backoff){
+        http_client client(m_apiEndpoint, m_http_config);
+        std::stringstream uri;
+        uri << "file/" << id;
+        uri_builder builder(uri.str());
+
+        http_response response = client.request(methods::PATCH, builder.to_string(), json, "application/json").get();
+        if(response.status_code() != 200){
+            LOG(ERROR) << "Failed to update object properties: " << response.reason_phrase();
+            LOG(ERROR) << response.extract_utf8string(true).get();
+//            LOG(ERROR) << response.headers()[""]
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 5) {
+                return updateObjectProperties(id, json, backoff+1);
+            }
+
+            return false;
+
+        }
+
+        return true;
 
     }
 

@@ -90,7 +90,60 @@ namespace DriveFS{
         });
     }
 
-    void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi);
+    void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi){
+        auto file = getObjectFromInodeAndReq(req, ino);
+        if(!file){
+            fuse_reply_err(req, ENOENT);
+            return;
+        }
+        file->m_event.wait();
+
+        if(to_set & FUSE_SET_ATTR_SIZE){
+            file->m_event.signal();
+            LOG(ERROR) << "Attempted to set size to file with name " << file->getName() << " and id " << file->getId();
+            LOG(ERROR) << "Settingg the file size is currently not supported";
+            fuse_reply_err(req, EIO);
+
+            return;
+        }
+
+        if(to_set & FUSE_SET_ATTR_MODE){
+            file->attribute.st_mode = attr->st_mode;
+        }
+
+        if(to_set & FUSE_SET_ATTR_ATIME){
+            file->attribute.st_atim = attr->st_atim;
+        }
+
+        if(to_set & FUSE_SET_ATTR_MTIME){
+            file->attribute.st_mtim = attr->st_mtim;
+        }
+
+        if(to_set & FUSE_SET_ATTR_CTIME){
+            file->attribute.st_ctim = attr->st_ctim;
+        }
+
+        if(to_set & FUSE_SET_ATTR_MTIME_NOW){
+            file->attribute.st_mtim = {time(nullptr),0};
+        }
+
+        if(to_set & FUSE_SET_ATTR_ATIME_NOW){
+            file->attribute.st_atim = {time(nullptr),0};
+        }
+
+        file->m_event.signal();
+        if(file->getIsUploaded()){
+            auto account = getAccount(req);
+            const bool status = account->updateObjectProperties(file->getId(), bsoncxx::to_json(file->to_bson()));
+            if(!status){
+                fuse_reply_err(req, EIO);
+                return;
+            }
+        }
+
+        fuse_reply_attr(req, &(file->attribute), 18000.0);
+
+    }
 
     void readlink(fuse_req_t req, fuse_ino_t ino);
 
@@ -430,16 +483,18 @@ namespace DriveFS{
                 }
             }
 
-            if(!value.empty()){
-                if(size >= value.size()+1){
-                    fuse_reply_buf(req, value.c_str(), value.size());
+            if(value.empty()){
+                if(size == 0) {
+                    fuse_reply_xattr(req, 0);
                 }else{
-                    fuse_reply_xattr(req, value.size()+1);
+                    fuse_reply_err(req, 0);
                 }
-                return;
-
+            }else if(size >= value.size()+1){
+                fuse_reply_buf(req, value.c_str(), value.size());
+            }else{
+                fuse_reply_xattr(req, value.size()+1);
             }
-
+            return;
 
         }
         fuse_reply_err(req, ENOENT);
@@ -580,6 +635,7 @@ namespace DriveFS{
         ops.rmdir = rmdir;
         ops.listxattr = listxattr;
         ops.getxattr = getxattr;
+        ops.setattr = setattr;
 
         return ops;
     }

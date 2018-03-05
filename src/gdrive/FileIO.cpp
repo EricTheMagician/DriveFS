@@ -114,17 +114,6 @@ namespace DriveFS{
 
         DownloadItem item;
         m_file->m_event.wait();
-        if(m_file->m_buffers == nullptr){
-            auto count = (m_file->getFileSize() + write_buffer_size)/write_buffer_size;
-            m_file->m_buffers = new std::vector<WeakBuffer>(count);
-
-        }else {
-            auto sz = m_file->m_buffers->size();
-            if (sz <= chunkStart) {
-                auto count = (m_file->getFileSize() + write_buffer_size) / write_buffer_size;
-                m_file->m_buffers->resize(count);
-            }
-        }
         m_file->m_event.signal();
         auto buffer = new std::vector<unsigned char>(size, 0);
         if ( (item = m_file->m_buffers->at(chunkStart).lock()) ) {
@@ -223,7 +212,7 @@ namespace DriveFS{
                                      m_file->getFileSize() - chunkNumber*write_buffer_size : write_buffer_size;
                      Object::cache.insert(m_file, chunkNumber, chunkSize, cache);
 //                    void FileIO::download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
-
+                    m_file->create_heap_handles(write_buffer_size);
                     (*m_file->m_buffers)[_chunkNumber] = cache;
 
                     cache->future = std::async(std::launch::async, &FileIO::download, this,  cache, cacheName,
@@ -287,6 +276,10 @@ namespace DriveFS{
     void FileIO::upload(){
         m_account->upsertFileToDatabase(m_file);
         std::string uploadUrl = m_account->getUploadUrlForFile(m_file);
+
+        // make sure that the file is no longer setting attribute
+        m_file->m_event.wait();
+        m_file->m_event.signal();
         bool status = m_account->upload(uploadUrl, f_name + ".released", m_file->getFileSize());
     }
 

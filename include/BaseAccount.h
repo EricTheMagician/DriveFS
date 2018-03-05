@@ -47,6 +47,7 @@ public:
 
     inline struct fuse_session * getFuseSession() const { return m_fuse_session;}
     inline void setFuseSession(struct fuse_session * session) { m_fuse_session=session;}
+    struct fuse_session* fuse_session;
 private:
 
     void open_browser_auth();

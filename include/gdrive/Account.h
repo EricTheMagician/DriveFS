@@ -53,6 +53,7 @@ namespace DriveFS {
         std::string getUploadUrlForFile(GDriveObject file, std::string mimeType = "application/octet-stream");
         bool upload(std::string uploadUrl, std::string filePath, size_t fileSize, int64_t  start=0, std::string mimeType = "application/octet-stream");
         std::optional<int64_t> getResumableUploadPoint(std::string url, size_t fileSize, int backoff=0);
+        bool updateObjectProperties(std::string id, std::string json, int backoff=0);
     protected:
         void run_internal() override;
         void loadFilesAndFolders() override;

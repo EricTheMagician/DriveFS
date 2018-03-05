@@ -40,6 +40,7 @@ int main(int argc, char **argv) {
 
     struct fuse_lowlevel_ops ops = DriveFS::getOps();
     session = fuse_session_new(&args,&ops, sizeof(ops), &account);
+    account.fuse_session = session;
     if (session == NULL)
         goto err_out1;
 

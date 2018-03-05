@@ -13,6 +13,11 @@
 #include <ctime>
 #include <easylogging++.h>
 
+
+#define APP_UID "driveFS_uid"
+#define APP_GID "driveFS_gid"
+#define APP_MODE "driveFS_mode"
+
 static adaptive::datetime::adaptive_parser parser { adaptive::datetime::adaptive_parser::full_match, {
     "%Y-%m-%dT%H:%M:%SZ"
 //    "%Y-%m-%dT%H:%M:%SZ
@@ -42,7 +47,7 @@ namespace DriveFS{
 
     std::map<ino_t, GDriveObject> _Object::inodeToObject;
     std::map<std::string, GDriveObject> _Object::idToObject;
-    PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(512*1024*1024);
+    PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(BLOCK_DOWNLOAD_SIZE, 512*1024*1024);
 
     _Object::_Object():File(), m_buffers(nullptr), heap_handles(nullptr), isUploaded(false){
     }
@@ -196,6 +201,8 @@ namespace DriveFS{
         attribute.st_nlink = 1;
         attribute.st_uid = 65534; // nobody
         attribute.st_gid = 65534;
+        updateProperties(document);
+
     }
     GDriveObject _Object::buildRoot(bsoncxx::document::view document){
         _Object f;
@@ -287,12 +294,15 @@ namespace DriveFS{
     }
 
 
-    void _Object::addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship){
+    bool _Object::addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship){
         m_event.wait();
+        bool status = false;
         if( std::find(relationship.begin(), relationship.end(), other) == relationship.end() ){
             relationship.emplace_back(other);
+            status = true;
         }
         m_event.signal();
+        return status;
     }
 
     void _Object::updateInode(bsoncxx::document::view document) {
@@ -348,10 +358,35 @@ namespace DriveFS{
         m_name = document["name"].get_utf8().value.to_string();
         attribute.st_mtim = getTimeFromRFC3339String(document["modifiedTime"].get_utf8().value.to_string());
         attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value.to_string());
-        attribute.st_atim = attribute.st_mtim;
-        attribute.st_nlink = 1;
-        attribute.st_uid = 65534; // nobody
-        attribute.st_gid = 65534;
+        updateProperties(document);
+    }
+
+    void _Object::updateProperties(bsoncxx::document::view document){
+        bool uid_found=false, gid_found=false;
+        auto maybeProperties = document["appProperties"];
+        if(maybeProperties){
+            auto appProperties = maybeProperties.get_document().value;
+            LOG(INFO) << getName();
+            auto maybeProperty = appProperties[APP_UID];
+            if(maybeProperty){
+                uid_found = true;
+                attribute.st_uid = maybeProperty.get_int32();
+            }
+
+            maybeProperty = appProperties[APP_GID];
+            if(maybeProperty){
+                gid_found = true;
+                attribute.st_gid = maybeProperty.get_int32();
+            }
+
+            maybeProperty = appProperties[APP_MODE];
+            if(maybeProperty){
+                attribute.st_mode = maybeProperty.get_int32();
+            }
+        }
+
+        if(!uid_found) attribute.st_uid = 65534; // nobody
+        if(!gid_found) attribute.st_gid = 65534;
 
     }
 
@@ -424,6 +459,11 @@ namespace DriveFS{
             array << parent->getId();
         }
         doc << "parents" << array;
+        doc << "appProperties"
+            << open_document << APP_MODE << (int) attribute.st_mode
+                             << APP_UID  << (int) attribute.st_uid
+                             << APP_GID  << (int) attribute.st_gid
+            << close_document;
 
         return doc.extract();
     }
