@@ -13,8 +13,8 @@ class File{
 public:
     static struct fuse_session *session;
     struct stat attribute;
-    File():m_event(1), lookupCount(0){}
-    File(const char *name):m_event(1), lookupCount(0), m_name(name){}
+    File():m_event(1), lookupCount(0), m_buffers(nullptr){}
+    File(const char *name):m_event(1), lookupCount(0), m_name(name), m_buffers(nullptr){}
     inline size_t getFileSize() const { return attribute.st_size; }
     inline void create_heap_handles(size_t write_buffer_size){
         if(m_buffers == nullptr){

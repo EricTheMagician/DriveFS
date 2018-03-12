@@ -3,7 +3,7 @@
 //
 
 #include "BaseAccount.h"
-
+#include <easylogging++.h>
 #include <boost/exception/all.hpp>
 
 using namespace utility;
@@ -127,7 +127,8 @@ BaseAccount::BaseAccount(std::string api, std::string id, std::string secret,
         m_listener(new oauth2_code_listener(redirect, m_oauth2_config)),
         m_needToInitialize(true),
         m_event(1),
-        m_key(id)
+        m_key(id),
+        m_token_expires_at(std::chrono::system_clock::now())
 {};
 
 void BaseAccount::open_browser_auth()
@@ -139,4 +140,34 @@ void BaseAccount::open_browser_auth()
 }
 
 BaseAccount::~BaseAccount(){
+}
+
+void BaseAccount::refresh_token(int backoff) {
+    m_event.wait();
+    try {
+        if(std::chrono::system_clock::now() >= m_token_expires_at ) {
+            LOG(INFO) << "Refreshing access tokens";
+            m_oauth2_config.token_from_refresh().get();
+            auto token = m_oauth2_config.token();
+            token.set_refresh_token(m_refresh_token);
+            m_oauth2_config.set_token(token);
+            m_token_expires_at = std::chrono::system_clock::now() + std::chrono::seconds(m_oauth2_config.token().expires_in()) - std::chrono::minutes(2);
+        }
+
+    } catch (std::exception &e) {
+        m_event.signal();
+        LOG(ERROR) << "Failed to refresh token";
+        LOG(ERROR) << e.what();
+        unsigned int sleep_time = std::pow(2, backoff);
+        LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+        sleep(sleep_time);
+        if (backoff <= 6) {
+            refresh_token(backoff + 1);
+        }
+        return;
+
+    }
+    m_event.signal();
+
+
 }

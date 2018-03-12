@@ -66,14 +66,11 @@ namespace DriveFS {
         void generateIds(int_fast8_t backoff=0);
         std::string createFolderOnGDrive(const std::string json, int backoff=0);
         bool trash(GDriveObject file, int backoff=0);
-        void refresh_token(int backoff=0);
         void background_update();
         boost::circular_buffer<std::string> m_id_buffer;
 
         std::string m_newStartPageToken="";
         std::atomic<ino_t> inode_count = 1;
-        std::chrono::system_clock::time_point m_token_expires_at;
-        int refresh_interval = 300;
     };
 };
 

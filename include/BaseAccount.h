@@ -45,6 +45,7 @@ public:
         return http_client(m_apiEndpoint, m_http_config);
     }
 
+
     inline struct fuse_session * getFuseSession() const { return m_fuse_session;}
     inline void setFuseSession(struct fuse_session * session) { m_fuse_session=session;}
     struct fuse_session* fuse_session;
@@ -53,6 +54,7 @@ private:
     void open_browser_auth();
 
 protected:
+    void refresh_token(int backoff=0);
     virtual void run_internal() = 0;
     virtual void loadFilesAndFolders() = 0;
     pplx::task<bool> authorization_code_flow();
@@ -66,6 +68,8 @@ protected:
     AutoResetEvent m_event;
     std::string m_key;
     std::string m_refresh_token;
+    int refresh_interval = 300;
+    std::chrono::system_clock::time_point m_token_expires_at;
 
 };
 

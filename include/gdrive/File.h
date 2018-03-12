@@ -57,6 +57,9 @@ namespace DriveFS {
         GDriveObject findChildByName( const char *name) const ;
         bsoncxx::document::value to_bson() const;
         std::string getCreatedTimeAsString() const;
+        void setName(const char *name){
+            m_name = name;
+        }
 
 
     public:

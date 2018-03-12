@@ -245,7 +245,18 @@ namespace DriveFS{
             newParent->addChild(child);
         }
 
-        //todo finish rename
+        child->setName(name);
+        if(child->getIsUploaded()){
+            auto account = getAccount(req);
+            const bool status = account->updateObjectProperties(child->getId(), bsoncxx::to_json(child->to_bson()));
+            if(!status){
+                fuse_reply_err(req, EIO);
+                return;
+            }
+        }
+
+        fuse_reply_attr(req, &(child->attribute), 18000.0);
+
     }
 
     void link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname);

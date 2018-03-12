@@ -19,7 +19,7 @@ typedef typename boost::heap::fibonacci_heap<DownloadItem>::handle_type heap_han
 
 class __no_collision_download__{
 public:
-    std::vector<unsigned char>* buffer;
+    std::vector<unsigned char>* buffer=nullptr;
     size_t size = 0;
     std::string_view name;
     std::shared_future<void> future;

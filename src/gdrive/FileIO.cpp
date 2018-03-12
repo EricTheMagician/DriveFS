@@ -154,7 +154,7 @@ namespace DriveFS{
 
             if ( (item=m_file->m_buffers->at(chunkNumber2).lock()) ) {
                 if(item) {
-                    if( item->buffer->empty() ){
+                    if( item->buffer == nullptr || item->buffer->empty() ){
                         item->event.wait();
                         item->event.signal();
                     }

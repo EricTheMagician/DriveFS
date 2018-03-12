@@ -366,7 +366,6 @@ namespace DriveFS{
         auto maybeProperties = document["appProperties"];
         if(maybeProperties){
             auto appProperties = maybeProperties.get_document().value;
-            LOG(INFO) << getName();
             auto maybeProperty = appProperties[APP_UID];
             if(maybeProperty){
                 uid_found = true;
