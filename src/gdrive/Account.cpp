@@ -934,7 +934,7 @@ namespace DriveFS {
         http_response resp = client.request(req).get();
         if (resp.status_code() != 200) {
             LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase();
-            LOG(ERROR) << resp.extract_json(true).get();
+            LOG(ERROR) << resp.extract_utf8string(true).get();
             unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for "<< sleep_time <<" second before retrying";
             sleep(sleep_time);

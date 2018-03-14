@@ -25,12 +25,12 @@
 #include <autoresetevent.h>
 
 #define MAX_CACHE_SIZE  (768*1024*1024) //(768*1024*1024) //2GB
-#define BLOCK_DOWNLOAD_SIZE 1048576L //1MB
+#define BLOCK_DOWNLOAD_SIZE (1048576L *2L) //1MB
 #define NUM_BLOCK_READ_AHEAD 8
 
 //these two define the range over which we should start doing a readhead
-#define BLOCKREADAHEADSTART 2097152
-#define BLOCKREADAHEADFINISH 2359296
+#define BLOCKREADAHEADSTART 262144L
+#define BLOCKREADAHEADFINISH 393216L
 
 
 

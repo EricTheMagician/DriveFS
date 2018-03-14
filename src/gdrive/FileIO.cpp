@@ -38,6 +38,8 @@ namespace DriveFS{
             m_event(1)
     {
         setFileName();
+        assert(m_readable || m_writeable || flag == 0);
+
     }
 
     FileIO::~FileIO(){
@@ -50,33 +52,52 @@ namespace DriveFS{
     }
 
     std::vector<unsigned char>* FileIO::read(const size_t &size, const off_t &off) {
-        if(b_is_cached){
-
+        if(b_is_cached && stream && stream.is_open()){
             auto buf = new std::vector<unsigned char>(size);
             stream.seekg(off);
             stream.read( (char *) buf->data(), size);
             return buf;
         }
-        return getFromCache(size, off );
+        try {
+            return getFromCache(size, off);
+        }catch(std::exception &e){
+            LOG(ERROR) << e.what();
+            m_file->m_event.signal();
+            return getFromCache(size, off);
+        }
 
     }
 
     void FileIO::download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
+        LOG(INFO) << "Downloading " << m_file->getName() <<"\t" << start;
         http_client client = m_account->getClient();
         uri_builder builder( std::string("files/") +  m_file->getId());
         builder.append_query("alt", "media");
 //        builder.append_query("acknowledgeAbuse", "true");
         builder.append_query("supportsTeamDrives", "true");
 
-        http_response  resp = client.request(methods::GET, builder.to_string()).get();
-        if(resp.status_code() != 200){
+        http_request req;
+        auto &headers = req.headers();
+        std::stringstream range;
+        range << "bytes="
+              << std::to_string(start)
+              << "-"
+              << std::to_string(end);
+        headers.add("Range", range.str());
+
+        req.set_method(methods::GET);
+        req.set_request_uri(builder.to_uri());
+
+        LOG(DEBUG) << req.headers()["Range"];
+        http_response  resp = client.request(req).get();
+        if(resp.status_code() != 206 && resp.status_code() != 200){
             LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
             LOG(ERROR) << resp.extract_json(true).get();
-            unsigned int sleep_time = std::pow(2, backoff);
+            const unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
             if (backoff <= 5) {
-                download(cache, cacheName, start, end, backoff + 1);
+                download(cache, std::move(cacheName), start, end, backoff + 1);
             }
             return;
         }
@@ -97,12 +118,12 @@ namespace DriveFS{
         }
     }
 
-    std::vector<unsigned char> * FileIO::getFromCache( const size_t &size, const off_t &off ){
+    std::vector<unsigned char> * FileIO::getFromCache( const size_t &_size, const off_t &off ){
 
         const uint64_t chunkNumber = getChunkNumber(off, write_buffer_size);
         const uint64_t chunkStart = getChunkStart(off, write_buffer_size);
-        const auto fileSize = m_file ->getFileSize();
-//        size = size + off > fileSize ? fileSize-off-1: size;
+        const auto fileSize = m_file->getFileSize();
+        const size_t size = _size + off > fileSize ? fileSize-off-1: _size;
         const bool spillOver = chunkStart != getChunkStart(off+size, write_buffer_size);
         std::stringstream ss;
         ss << m_file->getId();
@@ -113,10 +134,12 @@ namespace DriveFS{
         uint64_t spillOverPrecopy=0;
 
         DownloadItem item;
+//        LOG(INFO) << "Calling wait " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.wait();
+//        LOG(INFO) << "Calling signal " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.signal();
         auto buffer = new std::vector<unsigned char>(size, 0);
-        if ( (item = m_file->m_buffers->at(chunkStart).lock()) ) {
+        if ( (item = m_file->m_buffers->at(chunkNumber).lock()) ) {
 
             if(item->buffer==nullptr || item->buffer->empty()){
                 item->event.wait();
@@ -127,11 +150,12 @@ namespace DriveFS{
                 LOG(TRACE) << "cache was invalid for " << m_file->getName();
                 chunksToDownload.push_back(chunkNumber);
             }else {
-                uint64_t start = off % write_buffer_size;
-                uint64_t size2 = spillOver ? write_buffer_size - off : size;
+                const uint64_t start = off % write_buffer_size;
+                const uint64_t size2 = spillOver ? item->buffer->size() - start: size;
                 spillOverPrecopy = size2;
+                assert((start+size2) <= item->buffer->size());
                 memcpy(buffer->data(), item->buffer->data()+start, size2);
-                m_file->cache.updateAccessTime(m_file, chunkNumber, item);
+//                m_file->cache.updateAccessTime(m_file, chunkNumber, item);
             }
 
 
@@ -164,8 +188,9 @@ namespace DriveFS{
                         chunksToDownload.push_back(chunkNumber2);
                     }else{
                         uint64_t size2 = (off + size) % write_buffer_size;
+                        assert((spillOverPrecopy+size2) <= buffer->size());
                         memcpy( buffer->data() + spillOverPrecopy, item->buffer->data(), size2);
-                        m_file->cache.updateAccessTime(m_file, chunkNumber2, item);
+//                        m_file->cache.updateAccessTime(m_file, chunkNumber2, item);
                     }
 
                 }else{
@@ -178,6 +203,7 @@ namespace DriveFS{
 
         }
 
+
         bool done = chunksToDownload.empty();
         int off2 = off % write_buffer_size;
         if( off2 >= BLOCKREADAHEADSTART && off2 <= BLOCKREADAHEADFINISH ){
@@ -189,12 +215,13 @@ namespace DriveFS{
                 if (temp >= fileSize){
                     break;
                 }
-                chunksToDownload.push_back(temp);
+                chunksToDownload.push_back(temp/write_buffer_size);
             }
         }
 
         if(!chunksToDownload.empty()){
             m_file->m_event.wait();
+            m_file->create_heap_handles(write_buffer_size);
             for (auto _chunkNumber: chunksToDownload) {
                 auto start = _chunkNumber*write_buffer_size;
                 ss.str(std::string());
@@ -203,16 +230,15 @@ namespace DriveFS{
                 ss << start;
                 cacheName = ss.str();
                 DownloadItem item = m_file->m_buffers->at(_chunkNumber).lock();
-                if ( !(item) || !item->isInvalid){
+                if ( !(item) || item->isInvalid){
                     DownloadItem cache = std::make_shared<__no_collision_download__>();
                     cache->last_access = time(NULL);
                     cache->name = cacheName;
 
                     auto chunkSize = (_chunkNumber +1)*write_buffer_size >= m_file->getFileSize() ?
                                      m_file->getFileSize() - chunkNumber*write_buffer_size : write_buffer_size;
-                     Object::cache.insert(m_file, chunkNumber, chunkSize, cache);
+                     Object::cache.insert(m_file, _chunkNumber, chunkSize, cache);
 //                    void FileIO::download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
-                    m_file->create_heap_handles(write_buffer_size);
                     (*m_file->m_buffers)[_chunkNumber] = cache;
 
                     cache->future = std::async(std::launch::async, &FileIO::download, this,  cache, cacheName,
@@ -241,10 +267,10 @@ namespace DriveFS{
     }
 
     void FileIO::open(){
-        b_is_cached = true;
 
         if(m_writeable){
             clearFileFromCache();
+            b_is_cached = true;
             m_file->attribute.st_size = 0;
             stream.open(f_name, std::ios_base::out);
             create_write_buffer();
@@ -285,11 +311,11 @@ namespace DriveFS{
 
     void FileIO::release(){
 
-        if(last_write_to_buffer >0 ){
+        if(last_write_to_buffer >0 && stream && stream.is_open()){
             stream.write((char *) write_buffer->data(),last_write_to_buffer);
             last_write_to_buffer = 0;
+            stream.close();
         }
-        stream.close();
 
         if(b_needs_uploading){
 

@@ -11,6 +11,7 @@
 #include <string_view>
 #include <atomic>
 #include <autoresetevent.h>
+#include <easylogging++.h>
 
 class __no_collision_download__;
 typedef std::shared_ptr< __no_collision_download__> DownloadItem;
@@ -56,8 +57,9 @@ public:
         sema.wait();
         auto handle = cache->push(item);
         file->create_heap_handles(m_block_download_size);
-        (*(file->heap_handles))[chunkNumber] = handle;
+        *(file->heap_handles->data()+chunkNumber) = handle;
         auto newCacheSize = cacheSize.fetch_add(size, std::memory_order_release) + size;
+        LOG(INFO) << "Inserting " << std::to_string(chunkNumber);
         sema.signal();
     }
 

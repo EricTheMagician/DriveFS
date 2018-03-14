@@ -23,7 +23,7 @@ public:
 
         }else {
             auto count = (getFileSize() + write_buffer_size) / write_buffer_size;
-            if(count * write_buffer_size > getFileSize()){
+            if(count * write_buffer_size < getFileSize()){
                 m_buffers->resize(count);
             }
         }

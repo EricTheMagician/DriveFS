@@ -262,7 +262,7 @@ namespace DriveFS{
     void link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname);
 
     void open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        SFAsync([=] {
+//        SFAsync([=] {
             GDriveObject object = getObjectFromInodeAndReq(req, ino);
             if (object->getIsFolder()) {
                 fuse_reply_err(req, EISDIR);
@@ -277,19 +277,23 @@ namespace DriveFS{
             fi->fh = (uintptr_t) io;
 
             fuse_reply_open(req, fi);
-            assert(io->getIsReadable());
             return;
-        });
+//        });
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
-        SFAsync([=]{
+//        SFAsync([=]{buf->si
             FileIO * io = (FileIO *) fi->fh;
+            if(io == nullptr){
+                fuse_reply_err(req, EIO);
+                return;
+            }
             auto buf = io->read(size, off);
+            auto outsize = buf->size();
 
             fuse_reply_buf(req, (const char *) buf->data(), buf->size());
             delete buf;
-        });
+//        });
     }
 
     void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi){
@@ -403,8 +407,14 @@ namespace DriveFS{
     }
 
     void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        SFAsync([=]{
+//        SFAsync([=]{
             FileIO *io = (FileIO *) fi->fh;
+            if(io == nullptr){
+                fuse_reply_err(req, EIO);
+                return;
+            }
+            fuse_reply_err(req, 0);
+            fi->fh = 0;
             io->release();
 
             if(io->b_needs_uploading){
@@ -417,8 +427,7 @@ namespace DriveFS{
             }
 
             delete io;
-        });
-        fuse_reply_err(req, 0);
+//        });
     }
 
     void fsync(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
