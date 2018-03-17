@@ -152,8 +152,8 @@ void BaseAccount::refresh_token(int backoff) {
             token.set_refresh_token(m_refresh_token);
             m_oauth2_config.set_token(token);
             m_token_expires_at = std::chrono::system_clock::now() + std::chrono::seconds(m_oauth2_config.token().expires_in()) - std::chrono::minutes(2);
+            m_http_config.set_oauth2(m_oauth2_config);
         }
-
     } catch (std::exception &e) {
         m_event.signal();
         LOG(ERROR) << "Failed to refresh token";
