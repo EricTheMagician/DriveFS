@@ -231,8 +231,14 @@ namespace DriveFS {
                                         GDriveObject parent = cursor->second;
                                         parent->addChild(file);
                                         file->addParent(parent);
+                                        fuse_lowlevel_notify_inval_inode(this->fuse_session, parent->attribute.st_ino, 0, 0);
                                     }
                                 }
+                            }
+
+                            //invalidate old parents
+                            for(const auto &parent: oldParents){
+                                fuse_lowlevel_notify_inval_inode(this->fuse_session, parent->attribute.st_ino, 0, 0);
                             }
 
                             // notify the kernel that the inode is invalid.
