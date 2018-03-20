@@ -182,7 +182,7 @@ namespace DriveFS {
                             GDriveObject file = found->second;
                             std::vector<GDriveObject> oldParents = file->parents;
                             auto fileView = fileDoc.value;
-                            file->updateInode(view);
+                            file->updateInode(fileDoc);
 
                             auto newParentIds = fileView["parents"].get_array().value;
 
