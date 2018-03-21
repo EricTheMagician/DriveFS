@@ -551,8 +551,10 @@ namespace DriveFS {
                     if (deleted) {
                         if (deleted.get_bool().value) {
                             LOG(DEBUG) << bsoncxx::to_json(doc);
-                            toDelete.append(view["fileId"].get_utf8());
-                            hasItemsToDelete = true;
+                            if(view["fileId"]) {
+                                toDelete.append(view["fileId"].get_utf8());
+                                hasItemsToDelete = true;
+                            }
                         }
                     }
                     continue;
