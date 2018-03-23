@@ -57,8 +57,9 @@ namespace DriveFS {
     protected:
         void run_internal() override;
         void loadFilesAndFolders() override;
-        void getFilesAndFolders(std::string nextPageToken="", int backoff=0);
+        void getFilesAndFolders(std::string nextPageToken="", std::string teamDriveID="", int backoff=0);
     private:
+        void parseFilesAndFolders(bsoncxx::document::view value, std::string teamDriveId, bool notify_fs=true);
         void getTeamDrives(int backoff=0);
         void linkParentsAndChildren();
         std::string getNextId();
@@ -66,17 +67,17 @@ namespace DriveFS {
         void generateIds(int_fast8_t backoff=0);
         std::string createFolderOnGDrive(const std::string json, int backoff=0);
         bool trash(GDriveObject file, int backoff=0);
-        void background_update();
+        void background_update(std::string teamDriveId="", bool skip_sleep=false);
         boost::circular_buffer<std::string> m_id_buffer;
 
-        std::string m_newStartPageToken="";
+        std::map<std::string, std::string> m_newStartPageToken; // map teamDriveId to newStartPageToken
         std::atomic<ino_t> inode_count = 1;
     };
 };
 
 
-#define DATABASEDATA "GDriveData"
-#define DATABASESETTINGS "settings"
-#define DATABASENAME "DriveFS"
-#define GDRIVETOKENNAME "gdrive_tokens"
-#define GDRIVELASTCHANGETOKEN "gdrive last change token"
+constexpr std::string_view DATABASEDATA = "GDriveData";
+constexpr std::string_view DATABASESETTINGS = "settings";
+constexpr std::string_view DATABASENAME = "DriveFS";
+constexpr std::string_view GDRIVETOKENNAME = "gdrive_tokens";
+constexpr std::string_view GDRIVELASTCHANGETOKEN  = "gdrive last change token";

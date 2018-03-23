@@ -22,31 +22,32 @@ static mongocxx::options::find_one_and_update find_and_upsert;
 namespace DriveFS {
 
     Account::Account() : BaseAccount(
-        "https://www.googleapis.com/drive/v3/",
-        "126857315828-tj5cie9scsk0b5edmakl266p7pis80ts.apps.googleusercontent.com",
-        "wxvtZ_SZpmEKXSB0kITXYx6C",
-        "https://accounts.google.com/o/oauth2/v2/auth",
-        "https://www.googleapis.com/oauth2/v4/token",
-        "http://localhost:7878",
-        GDRIVE_OAUTH_SCOPE),
-         m_id_buffer(10) {
+            "https://www.googleapis.com/drive/v3/",
+            "126857315828-tj5cie9scsk0b5edmakl266p7pis80ts.apps.googleusercontent.com",
+            "wxvtZ_SZpmEKXSB0kITXYx6C",
+            "https://accounts.google.com/o/oauth2/v2/auth",
+            "https://www.googleapis.com/oauth2/v4/token",
+            "http://localhost:7878",
+            GDRIVE_OAUTH_SCOPE),
+                         m_id_buffer(10) {
 
         upsert.upsert(true);
         find_and_upsert.upsert(true);
 
         mongocxx::pool::entry conn = pool.acquire();
-        mongocxx::database client = conn->database(DATABASENAME);
-        mongocxx::collection db = client[DATABASESETTINGS];
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DATABASESETTINGS)];
 
-        auto maybeResult = db.find_one(
-            document{} << "name" << GDRIVELASTCHANGETOKEN << finalize
+        auto maybeResult = db.find(
+                document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << finalize
         );
 
-        if (maybeResult) {
-            auto res = maybeResult->view()["value"];
-            if (res) {
+        for (auto changeTokens: maybeResult) {
+            auto res = changeTokens["value"];
+            auto driveId = changeTokens["id"];
+            if (res && driveId) {
                 LOG(INFO) << "Previous change tokens founds";
-                m_newStartPageToken = res.get_utf8().value.to_string();
+                m_newStartPageToken[driveId.get_utf8().value.to_string()] = res.get_utf8().value.to_string();
             }
 
         }
@@ -66,20 +67,21 @@ namespace DriveFS {
         m_http_config.set_oauth2(m_oauth2_config);
         m_needToInitialize = false;
         getFilesAndFolders();
-        background_update();
+        loadFilesAndFolders();
+        SFAsync(&Account::background_update, this, std::string(""), false);
     }
 
 
     void Account::run_internal() {
 
         mongocxx::pool::entry conn = pool.acquire();
-        mongocxx::database client = conn->database(DATABASENAME);
-        mongocxx::collection db = client[DATABASESETTINGS];
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DATABASESETTINGS)];
         auto &token = m_oauth2_config.token();
         mongocxx::options::update options;
         options.upsert(true);
-        db.update_one(document{} << "name" << GDRIVETOKENNAME << finalize,
-                      document{} << "$set" << open_document << "name" << GDRIVETOKENNAME << "access_token"
+        db.update_one(document{} << "name" << std::string(GDRIVETOKENNAME) << finalize,
+                      document{} << "$set" << open_document << "name" << std::string(GDRIVETOKENNAME) << "access_token"
                                  << token.access_token() << "refresh_token" << token.refresh_token() << close_document
                                  << finalize,
                       options
@@ -88,18 +90,18 @@ namespace DriveFS {
 
 
         getFilesAndFolders();
-        background_update();
+        SFAsync(&Account::background_update, this, std::string(""), false);
 
     }
 
     Account Account::getAccount() {
         LOG(TRACE) << "Getting Account";
         mongocxx::pool::entry conn = pool.acquire();
-        mongocxx::database client = conn->database(DATABASENAME);
-        mongocxx::collection db = client[DATABASESETTINGS];
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DATABASESETTINGS)];
 
         auto maybeResult = db.find_one(
-            document{} << "name" << GDRIVETOKENNAME << finalize
+                document{} << "name" << std::string(GDRIVETOKENNAME) << finalize
         );
 
         if (maybeResult) {
@@ -107,213 +109,253 @@ namespace DriveFS {
             auto res = maybeResult->view();
             std::string at(res["access_token"].get_utf8().value.to_string()),
                     rt(res["refresh_token"].get_utf8().value.to_string());
-            return Account(at, rt);
+
+            if (!at.empty() && !rt.empty())
+                return Account(at, rt);
 
         }
         return Account();
     }
 
-    void Account::background_update(){
-        SFAsync([this]{
-            try {
+    void Account::background_update(std::string teamDriveId, bool skip_sleep) {
+        try {
+            if ( !skip_sleep || teamDriveId.empty()) {
                 sleep(this->refresh_interval);
-                refresh_token();
-                LOG(INFO) << "Getting updated list of files and folders";
+            }
+            refresh_token();
 
-                http_client client(this->m_apiEndpoint, this->m_http_config);
-                uri_builder uriBuilder("changes");
-                uriBuilder.append_query("pageToken", this->m_newStartPageToken);
-                uriBuilder.append_query("pageSize", 1000);
-                uriBuilder.append_query("includeTeamDriveItems", "true");
-                uriBuilder.append_query("supportsTeamDrives", "true");
-                uriBuilder.append_query("spaces", "drive");
-                uriBuilder.append_query("fields", "changes,nextPageToken,newStartPageToken");
+            http_client client(this->m_apiEndpoint, this->m_http_config);
+            uri_builder uriBuilder("changes");
+            std::string pageToken = this->m_newStartPageToken[teamDriveId];
+            if (pageToken.empty()) {
+                LOG(ERROR) << "pageToken is empty";
+            }
+            if (teamDriveId.empty()) {
+                LOG(INFO) << "Getting updated list of files and folders for root folder with token " << pageToken;
+            } else {
+                LOG(INFO) << "Getting updated list of files and folders for folder " << teamDriveId << " and token "
+                          << pageToken;
+                uriBuilder.append_query("teamDriveId", teamDriveId);
+            }
+            uriBuilder.append_query("pageToken", pageToken);
+            uriBuilder.append_query("pageSize", 1000);
+            uriBuilder.append_query("includeTeamDriveItems", "true");
+            uriBuilder.append_query("supportsTeamDrives", "true");
+            uriBuilder.append_query("spaces", "drive");
+            uriBuilder.append_query("fields", "changes,nextPageToken,newStartPageToken");
 
-                auto response = client.request(methods::GET, uriBuilder.to_string()).get();
-                if (response.status_code() != 200) {
-                    LOG(ERROR) << "Failed to get changes: " << response.reason_phrase();
-                    LOG(ERROR) << response.extract_json(true).get();
-                    background_update();
-                    return;
-                }
-                mongocxx::bulk_write documents;
-                bsoncxx::document::value doc = bsoncxx::from_json(response.extract_utf8string().get());
-                bsoncxx::document::view value = doc.view();
+            auto response = client.request(methods::GET, uriBuilder.to_string()).get();
+            if (response.status_code() != 200) {
+                LOG(ERROR) << "Failed to get changes: " << response.reason_phrase();
+                LOG(ERROR) << response.extract_json(true).get();
+                background_update(teamDriveId, false);
+                return;
+            }
+            mongocxx::bulk_write documents;
+            bsoncxx::document::value doc = bsoncxx::from_json(response.extract_utf8string().get());
+            bsoncxx::document::view value = doc.view();
 
-                bool needs_updating = false;
+            bool needs_updating = false;
 
-                auto eleChanges = value["changes"];
-                auto toDelete = bsoncxx::builder::basic::array{};
-                bool hasItemsToDelete = false;
-                if (eleChanges) {
-                    bsoncxx::array::view changes = eleChanges.get_array().value;
-                    int count = 0;
-                    for (const auto &change : changes) {
-                        auto doc = change.get_document();
-                        auto view = doc.view();
-                        auto file = view["file"];
-                        if (!file) {
-                            auto deleted = view["removed"];
-                            if (deleted) {
-                                if (deleted.get_bool().value) {
-                                    LOG(DEBUG) << bsoncxx::to_json(doc);
+            auto eleChanges = value["changes"];
+            auto toDelete = bsoncxx::builder::basic::array{};
+            bool hasItemsToDelete = false;
+            if (eleChanges) {
+                bsoncxx::array::view changes = eleChanges.get_array().value;
+                int count = 0;
+                for (const auto &change : changes) {
+                    auto doc = change.get_document();
+                    auto view = doc.view();
+                    auto file = view["file"];
+                    if (!file) {
+                        auto deleted = view["removed"];
+                        if (deleted) {
+                            if (deleted.get_bool().value) {
+                                LOG(DEBUG) << bsoncxx::to_json(doc);
+                                if (view["fileId"]) {
                                     toDelete.append(view["fileId"].get_utf8());
                                     hasItemsToDelete = true;
                                 }
                             }
+                        }
+                        continue;
+                    }
+
+                    needs_updating = true;
+                    auto fileDoc = file.get_document();
+                    auto id = view["fileId"].get_utf8().value.to_string();
+
+                    mongocxx::model::update_one upsert_op(
+                            document{} << "id" << id << finalize,
+                            document{} << "$set" << fileDoc << finalize
+                    );
+
+                    upsert_op.upsert(true);
+                    documents.append(upsert_op);
+
+                    auto found = _Object::idToObject.find(id);
+
+                    if (found != _Object::idToObject.cend()) {
+                        GDriveObject file = found->second;
+                        std::vector<GDriveObject> oldParents = file->parents;
+                        auto fileView = fileDoc.value;
+                        file->updateInode(fileDoc);
+
+                        auto newParentIds = fileView["parents"];
+                        if (!newParentIds) {
+                            LOG(DEBUG) << bsoncxx::to_json(view);
                             continue;
                         }
 
-                        needs_updating = true;
-                        auto fileDoc = file.get_document();
-                        auto id = view["fileId"].get_utf8().value.to_string();
-
-                        mongocxx::model::update_one upsert_op(
-                                document{} << "id" << id << finalize,
-                                document{} << "$set" << fileDoc << finalize
-                        );
-
-                        upsert_op.upsert(true);
-                        documents.append(upsert_op);
-
-                        auto found = _Object::idToObject.find(id);
-
-                        if (found != _Object::idToObject.cend()) {
-                            GDriveObject file = found->second;
-                            std::vector<GDriveObject> oldParents = file->parents;
-                            auto fileView = fileDoc.value;
-                            file->updateInode(fileDoc);
-
-                            auto newParentIds = fileView["parents"].get_array().value;
-
-                            //remove old parents
-                            for (auto parentId: newParentIds) {
-                                const std::string s_parentId = parentId.get_utf8().value.to_string();
-                                bool need_to_remove = true;
-                                for (auto &parent: oldParents) {
-                                    if (parent->getId() == s_parentId) {
-                                        need_to_remove = false;
-                                        break;
-                                    }
-                                }
-
-                                if (need_to_remove) {
-                                    auto cursor = DriveFS::_Object::idToObject.find(s_parentId);
-                                    if (cursor != DriveFS::_Object::idToObject.cend()) {
-                                        GDriveObject parent;
-                                        parent = cursor->second;
-                                        parent->removeChild(file);
-                                        file->removeParent(parent);
-                                    }//if it't not already present, it probably means we already removed it locally and the background update is now syncing.
-                                }
-
-
-                            }
-
-                            LOG(DEBUG) << bsoncxx::to_json(fileDoc);
-
-                            // add new parents
-                            oldParents = file->parents;
-                            for (auto parentId: newParentIds) {
-                                bool need_to_set = true;
-                                const std::string s_parentId = parentId.get_utf8().value.to_string();
-                                for (auto parent: oldParents) {
-                                    if (parent->getId() != s_parentId) {
-                                        continue;
-                                    } else {
-                                        need_to_set = false;
-                                        break;
-                                    }
-                                }
-                                if (need_to_set) {
-                                    auto cursor = DriveFS::_Object::idToObject.find(s_parentId);
-                                    if (cursor != DriveFS::_Object::idToObject.cend()) {
-                                        GDriveObject parent = cursor->second;
-                                        parent->addChild(file);
-                                        file->addParent(parent);
-                                        fuse_lowlevel_notify_inval_inode(this->fuse_session, parent->attribute.st_ino, 0, 0);
-                                    }
+                        //remove old parents
+                        for (auto parentId: newParentIds.get_array().value) {
+                            const std::string s_parentId = parentId.get_utf8().value.to_string();
+                            bool need_to_remove = true;
+                            for (auto &parent: oldParents) {
+                                if (parent->getId() == s_parentId) {
+                                    need_to_remove = false;
+                                    break;
                                 }
                             }
 
-                            //invalidate old parents
-                            for(const auto &parent: oldParents){
-                                fuse_lowlevel_notify_inval_inode(this->fuse_session, parent->attribute.st_ino, 0, 0);
+                            if (need_to_remove) {
+                                auto cursor = DriveFS::_Object::idToObject.find(s_parentId);
+                                if (cursor != DriveFS::_Object::idToObject.cend()) {
+                                    GDriveObject parent;
+                                    parent = cursor->second;
+                                    parent->removeChild(file);
+                                    file->removeParent(parent);
+                                }//if it't not already present, it probably means we already removed it locally and the background update is now syncing.
                             }
 
-                            // notify the kernel that the inode is invalid.
-                            fuse_lowlevel_notify_inval_inode(this->fuse_session, file->attribute.st_ino, -1, 0);
 
-                        } else {
-                            auto inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
-                            auto file = std::make_shared<DriveFS::_Object>(inode, fileDoc);
+                        }
 
-                            _Object::idToObject[file->getId()] = file;
-                            _Object::inodeToObject[inode] = file;
+                        VLOG(3) << bsoncxx::to_json(fileDoc);
 
-                            for (auto &p : file->parents) {
-                                p->addChild(file);
-                                file->addParent(p);
+                        // add new parents
+                        oldParents = file->parents;
+                        for (auto parentId: newParentIds.get_array().value) {
+                            bool need_to_set = true;
+                            const std::string s_parentId = parentId.get_utf8().value.to_string();
+                            for (auto parent: oldParents) {
+                                if (parent->getId() != s_parentId) {
+                                    continue;
+                                } else {
+                                    need_to_set = false;
+                                    break;
+                                }
+                            }
+                            if (need_to_set) {
+                                auto cursor = DriveFS::_Object::idToObject.find(s_parentId);
+                                if (cursor != DriveFS::_Object::idToObject.cend()) {
+                                    GDriveObject parent = cursor->second;
+                                    parent->addChild(file);
+                                    file->addParent(parent);
+                                    fuse_lowlevel_notify_inval_inode(this->fuse_session, parent->attribute.st_ino, 0,
+                                                                     0);
+                                }
                             }
                         }
 
+                        //invalidate old parents
+                        for (const auto &parent: oldParents) {
+                            fuse_lowlevel_notify_inval_inode(this->fuse_session, parent->attribute.st_ino, 0, 0);
+                        }
+
+                        // notify the kernel that the inode is invalid.
+                        fuse_lowlevel_notify_inval_inode(this->fuse_session, file->attribute.st_ino, -1, 0);
+
+                    } else {
+                        auto inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
+                        auto file = std::make_shared<DriveFS::_Object>(inode, fileDoc);
+
+                        _Object::idToObject[file->getId()] = file;
+                        _Object::inodeToObject[inode] = file;
+
+                        for (auto &p : file->parents) {
+                            p->addChild(file);
+                            file->addParent(p);
+                        }
                     }
+
+                }
+            }
+
+
+            if (needs_updating or hasItemsToDelete) {
+                mongocxx::pool::entry conn = pool.acquire();
+                mongocxx::database client = conn->database(std::string(DATABASENAME));
+                mongocxx::collection data = client[std::string(DATABASEDATA)];
+                mongocxx::collection settings = client[std::string(DATABASESETTINGS)];
+
+                if (needs_updating) {
+                    data.bulk_write(documents);
+                }
+                if (hasItemsToDelete) {
+                    data.delete_many(
+                            document{} << "id" << open_document << "$in" << toDelete << close_document << finalize
+                    );
+
                 }
 
 
-                if (needs_updating or hasItemsToDelete) {
-                    mongocxx::pool::entry conn = pool.acquire();
-                    mongocxx::database client = conn->database(DATABASENAME);
-                    mongocxx::collection data = client[DATABASEDATA];
-                    mongocxx::collection settings = client[DATABASESETTINGS];
+                settings.find_one_and_update(document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << finalize,
+                                             document{} << "$set" << open_document
+                                                        << "value" << m_newStartPageToken[teamDriveId]
+                                                        << "id" << teamDriveId
+                                                        << close_document
+                                                        << finalize,
+                                             find_and_upsert
 
-                    if (needs_updating) {
-                        data.bulk_write(documents);
-                    }
-                    if (hasItemsToDelete) {
-                        data.delete_many(
-                                document{} << "id" << open_document << "$in" << toDelete << close_document << finalize
-                        );
-
-                    }
-
-
-                    settings.find_one_and_update(document{} << "name" << GDRIVELASTCHANGETOKEN << finalize,
-                                                 document{} << "$set" << open_document << "value" << m_newStartPageToken
-                                                            << close_document
-                                                            << finalize,
-                                                 find_and_upsert
-
-                    );
+                );
 //            if (updateCache)
 //                m_account->updateCache();
-                }
+            }
 
-                // parse files
-                //get next page token
-                bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
-
-                //get new start page token
-                bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
-                if (newStartPageToken) {
-                    m_newStartPageToken = newStartPageToken.get_utf8().value.to_string();
+            // parse files
+            //get next page token
+            bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
+            if (nextPageTokenField) {
+                auto temp = nextPageTokenField.get_utf8().value.to_string();
+                if (!temp.empty()) {
+                    m_newStartPageToken[teamDriveId] = std::move(temp);
                 }
+            }
 
-                if (nextPageTokenField) {
-                    getFilesAndFolders(nextPageTokenField.get_utf8().value.to_string());
+            //get new start page token
+            bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
+            if (newStartPageToken) {
+                auto temp = newStartPageToken.get_utf8().value.to_string();
+                if (!temp.empty() && temp != pageToken) {
+                    m_newStartPageToken[teamDriveId] = std::move(temp);
                 }
-            }catch(std::exception &e){
-                LOG(ERROR) << e.what();
+            }
+
+            if (nextPageTokenField) {
+                background_update(teamDriveId, true);
+            }
+        } catch (std::exception &e) {
+            LOG(ERROR) << e.what();
+            background_update(teamDriveId, true);
+        }
+
+        if (teamDriveId.empty()) {
+
+            for (auto item : this->m_newStartPageToken) {
+                if (!item.first.empty())
+                    background_update(item.first, true);
             }
             background_update();
-        });
+        }
     }
+
 
     void Account::linkParentsAndChildren() {
         LOG(TRACE) << "Linking parent and children";
         mongocxx::pool::entry conn = pool.acquire();
-        mongocxx::database client = conn->database(DATABASENAME);
-        mongocxx::collection db = client[DATABASEDATA];
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DATABASEDATA)];
         mongocxx::options::find options;
         options.projection(document{} << "parents" << 1 << "id" << 1 << finalize);
         auto cursor = db.find(
@@ -341,8 +383,8 @@ namespace DriveFS {
         LOG(TRACE) << "Filling GDrive Cache";
         bool needs_updating = false;
         mongocxx::pool::entry conn = pool.acquire();
-        mongocxx::database client = conn->database(DATABASENAME);
-        mongocxx::collection db = client[DATABASEDATA];
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DATABASEDATA)];
 
         //find root
 
@@ -368,28 +410,27 @@ namespace DriveFS {
             //get the inode of the object
             inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
 
-
             auto object = std::make_shared<DriveFS::_Object>(inode, doc);
 
-            if(!object->getIsFolder() && !object->getIsUploaded()){
+            if (!object->getIsFolder() && !object->getIsUploaded()) {
 
                 FileIO *io = new FileIO(object, 0, this);
-                if( io->validateCachedFileForUpload(true) ){
+                if (io->validateCachedFileForUpload(true)) {
                     auto ele = doc["uploadUrl"];
 //                    LOG(INFO) << "Resuming upload of: " << object->getName();
-                    if(ele){
+                    if (ele) {
                         std::string url = ele.get_utf8().value.to_string();
                         SFAsync([io, url] {
                             io->resumeFileUploadFromUrl(url);
                             delete io;
                         });
-                    }else{
-                        SFAsync( [io]{
+                    } else {
+                        SFAsync([io] {
                             io->upload();
                             delete io;
                         });
                     }
-                }else{
+                } else {
                     delete io;
                     toDelete << object->getId();
                     hasItemsToDelete = true;
@@ -450,7 +491,7 @@ namespace DriveFS {
 //                db.bulk_write(documents);
 //            }
 
-        cursor = client[DATABASEDATA].find(document{} << "kind" << "drive#teamDrive" << finalize);
+        cursor = client[std::string(DATABASEDATA)].find(document{} << "kind" << "drive#teamDrive" << finalize);
         if (cursor.begin() != cursor.end()) {
             auto inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
             auto team_drive = _Object::buildTeamDriveHolder(inode, root);
@@ -465,7 +506,7 @@ namespace DriveFS {
         linkParentsAndChildren();
     }
 
-    void Account::getFilesAndFolders(std::string nextPageToken, int backoff) {
+    void Account::getFilesAndFolders(std::string nextPageToken, std::string teamDriveId, int backoff) {
 
         refresh_token();
         LOG(INFO) << "Getting updated list of files and folders";
@@ -474,8 +515,13 @@ namespace DriveFS {
         uri_builder uriBuilder("changes");
         if (nextPageToken.length() > 0) {
             uriBuilder.append_query("pageToken", nextPageToken);
-        } else if (m_newStartPageToken.length() > 0) {
-            uriBuilder.append_query("pageToken", m_newStartPageToken);
+        } else if (m_newStartPageToken.size() > 0) {
+            auto found = m_newStartPageToken.find(teamDriveId);
+            if (found != m_newStartPageToken.cend()) {
+                uriBuilder.append_query("pageToken", found->second);
+            } else {
+                uriBuilder.append_query("pageToken", "1");
+            }
         } else {
             uriBuilder.append_query("pageToken", "1");
             // get root metadata
@@ -484,8 +530,8 @@ namespace DriveFS {
             bsoncxx::document::value doc = bsoncxx::from_json(response.get());
             bsoncxx::document::view value = doc.view();
             mongocxx::pool::entry conn = pool.acquire();
-            mongocxx::database client = conn->database(DATABASENAME);
-            mongocxx::collection data = client[DATABASEDATA];
+            mongocxx::database client = conn->database(std::string(DATABASENAME));
+            mongocxx::collection data = client[std::string(DATABASEDATA)];
 
             auto rootValue = value["id"];
             if (rootValue) {
@@ -502,11 +548,15 @@ namespace DriveFS {
             }
         }
 
-        uriBuilder.append_query("pageSize", 1000);
+        uriBuilder.append_query("pageSize", "500");
         uriBuilder.append_query("includeTeamDriveItems", "true");
+        uriBuilder.append_query("includeCorpusRemovals", "true");
         uriBuilder.append_query("supportsTeamDrives", "true");
-        uriBuilder.append_query("spaces", "drive");
+//        uriBuilder.append_query("spaces", "drive");
         uriBuilder.append_query("fields", "changes,nextPageToken,newStartPageToken");
+        if (!teamDriveId.empty()) {
+            uriBuilder.append_query("teamDriveId", teamDriveId);
+        }
 
         auto response = client.request(methods::GET, uriBuilder.to_string()).get();
         if (response.status_code() != 200) {
@@ -516,11 +566,10 @@ namespace DriveFS {
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
             if (backoff <= 5) {
-                getFilesAndFolders(nextPageToken, backoff + 1);
+                getFilesAndFolders(nextPageToken, teamDriveId, backoff + 1);
             }
             return;
         }
-        mongocxx::bulk_write documents;
         bsoncxx::document::value doc = bsoncxx::from_json(response.extract_utf8string().get());
         bsoncxx::document::view value = doc.view();
 
@@ -531,10 +580,29 @@ namespace DriveFS {
 
         //get new start page token
         bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
-        if (newStartPageToken) {
-            m_newStartPageToken = newStartPageToken.get_utf8().value.to_string();
+        if (nextPageTokenField) {
+            m_newStartPageToken[teamDriveId] = nextPageTokenField.get_utf8().value.to_string();
+        } else if (newStartPageToken) {
+            m_newStartPageToken[teamDriveId] = newStartPageToken.get_utf8().value.to_string();
         }
 
+        parseFilesAndFolders(value, teamDriveId, false);
+
+        // parse files
+        if (nextPageTokenField) {
+            getFilesAndFolders(nextPageTokenField.get_utf8().value.to_string(), teamDriveId);
+        } else {
+            if (teamDriveId.empty()) {
+                getTeamDrives();
+            };
+        }
+
+
+    }
+
+    void Account::parseFilesAndFolders(bsoncxx::document::view value, std::string teamDriveId, bool notify_filesystem) {
+        bool needs_updating = false;
+        mongocxx::bulk_write documents;
 
         auto eleChanges = value["changes"];
         auto toDelete = bsoncxx::builder::basic::array{};
@@ -551,7 +619,7 @@ namespace DriveFS {
                     if (deleted) {
                         if (deleted.get_bool().value) {
                             LOG(DEBUG) << bsoncxx::to_json(doc);
-                            if(view["fileId"]) {
+                            if (view["fileId"]) {
                                 toDelete.append(view["fileId"].get_utf8());
                                 hasItemsToDelete = true;
                             }
@@ -585,9 +653,9 @@ namespace DriveFS {
 
         if (needs_updating or hasItemsToDelete) {
             mongocxx::pool::entry conn = pool.acquire();
-            mongocxx::database client = conn->database(DATABASENAME);
-            mongocxx::collection data = client[DATABASEDATA];
-            mongocxx::collection settings = client[DATABASESETTINGS];
+            mongocxx::database client = conn->database(std::string(DATABASENAME));
+            mongocxx::collection data = client[std::string(DATABASEDATA)];
+            mongocxx::collection settings = client[std::string(DATABASESETTINGS)];
 
             if (needs_updating) {
                 data.bulk_write(documents);
@@ -600,8 +668,11 @@ namespace DriveFS {
             }
 
 
-            settings.find_one_and_update(document{} << "name" << GDRIVELASTCHANGETOKEN << finalize,
-                                         document{} << "$set" << open_document << "value" << m_newStartPageToken
+            settings.find_one_and_update(document{} << "name" << std::string(GDRIVELASTCHANGETOKEN)
+                                                    << "id" << teamDriveId
+                                                    << finalize,
+                                         document{} << "$set" << open_document
+                                                    << "value" << m_newStartPageToken[teamDriveId]
                                                     << close_document
                                                     << finalize,
                                          find_and_upsert
@@ -610,16 +681,6 @@ namespace DriveFS {
 //            if (updateCache)
 //                m_account->updateCache();
         }
-
-        // parse files
-
-        if (nextPageTokenField) {
-            getFilesAndFolders(nextPageTokenField.get_utf8().value.to_string());
-        } else {
-            getTeamDrives();
-            loadFilesAndFolders();
-        }
-
 
     }
 
@@ -651,22 +712,13 @@ namespace DriveFS {
         bsoncxx::document::view value = doc.view();
 
         bool needs_updating = false;
-
-        //get next page token
-        bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
-
-        //get new start page token
-        bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
-        if (newStartPageToken) {
-            m_newStartPageToken = newStartPageToken.get_utf8().value.to_string();
-        }
-
-
-        auto eleChanges = value["teamDrives"];
+        auto eleTeamDrives = value["teamDrives"];
         auto toDelete = bsoncxx::builder::basic::array{};
 
-        if (eleChanges) {
-            bsoncxx::array::view drives = eleChanges.get_array().value;
+
+        // update the database with teamdrives
+        if (eleTeamDrives) {
+            bsoncxx::array::view drives = eleTeamDrives.get_array().value;
             needs_updating = !drives.empty();
             int count = 0;
             for (const auto &drive : drives) {
@@ -686,12 +738,24 @@ namespace DriveFS {
 
         if (needs_updating) {
             mongocxx::pool::entry conn = pool.acquire();
-            mongocxx::database client = conn->database(DATABASENAME);
-            mongocxx::collection data = client[DATABASEDATA];
-            mongocxx::collection settings = client[DATABASESETTINGS];
+            mongocxx::database client = conn->database(std::string(DATABASENAME));
+            mongocxx::collection data = client[std::string(DATABASEDATA)];
 
             data.bulk_write(documents);
 
+        }
+
+        // get the changes  for the team drives
+        if (eleTeamDrives) {
+            bsoncxx::array::view drives = eleTeamDrives.get_array().value;
+            needs_updating = !drives.empty();
+            int count = 0;
+            for (const auto &drive : drives) {
+                auto doc = drive.get_document();
+                auto view = doc.view();
+                auto id = view["id"].get_utf8().value.to_string();
+                getFilesAndFolders("", id);
+            }
         }
 
     }
@@ -785,8 +849,8 @@ namespace DriveFS {
 
             if (!status.empty()) {
                 mongocxx::pool::entry conn = pool.acquire();
-                mongocxx::database client = conn->database(DATABASENAME);
-                mongocxx::collection db = client[DATABASEDATA];
+                mongocxx::database client = conn->database(std::string(DATABASENAME));
+                mongocxx::collection db = client[std::string(DATABASEDATA)];
                 db.insert_one(obj.to_bson());
             } else {
                 return nullptr;
@@ -853,8 +917,8 @@ namespace DriveFS {
         if (file) {
             try {
                 mongocxx::pool::entry conn = pool.acquire();
-                mongocxx::database client = conn->database(DATABASENAME);
-                mongocxx::collection data = client[DATABASEDATA];
+                mongocxx::database client = conn->database(std::string(DATABASENAME));
+                mongocxx::collection data = client[std::string(DATABASEDATA)];
                 auto status = data.update_one(
                         document{} << "id" << file->getId() << finalize,
                         document{} << "$set" << open_document << concatenate(file->to_bson()) << close_document
@@ -862,7 +926,7 @@ namespace DriveFS {
                         upsert
                 );
                 status;
-            }catch(std::exception &e){
+            } catch (std::exception &e) {
                 LOG(ERROR) << e.what();
             }
         }
@@ -895,7 +959,6 @@ namespace DriveFS {
             << "parents" << parents;
 
 
-
         auto body = bsoncxx::to_json(doc.extract());
         req.set_body(body, "application/json");
 //        json::value body;
@@ -914,19 +977,19 @@ namespace DriveFS {
             LOG(INFO) << "Sleeping for 1 second before retrying";
             sleep(1);
             location = getUploadUrlForFile(req);
-        }else {
+        } else {
             location = resp.headers()["Location"];
         }
 
-        SFAsync([location, file]{
+        SFAsync([location, file] {
 
             mongocxx::pool::entry conn = pool.acquire();
-            mongocxx::database dbclient = conn->database(DATABASENAME);
-            mongocxx::collection db = dbclient[DATABASEDATA];
+            mongocxx::database dbclient = conn->database(std::string(DATABASENAME));
+            mongocxx::collection db = dbclient[std::string(DATABASEDATA)];
             file->m_event.wait();
             db.update_one(document{} << "id" << file->getId() << finalize,
-                document{} << "$set" << open_document <<
-                          "uploadUrl" << location << close_document << finalize
+                          document{} << "$set" << open_document <<
+                                     "uploadUrl" << location << close_document << finalize
             );
             file->m_event.signal();
 
@@ -944,28 +1007,30 @@ namespace DriveFS {
             LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase();
             LOG(ERROR) << resp.extract_utf8string(true).get();
             unsigned int sleep_time = std::pow(2, backoff);
-            LOG(INFO) << "Sleeping for "<< sleep_time <<" second before retrying";
+            LOG(INFO) << "Sleeping for " << sleep_time << " second before retrying";
             sleep(sleep_time);
-            return getUploadUrlForFile(req, backoff+1);
+            return getUploadUrlForFile(req, backoff + 1);
         }
         return resp.headers()["Location"];
 //        return location;
 
     }
 
-    bool Account::upload(std::string uploadUrl, std::string filePath, size_t fileSize, int64_t start, std::string mimeType){
+    bool
+    Account::upload(std::string uploadUrl, std::string filePath, size_t fileSize, int64_t start, std::string mimeType) {
         try {
-            concurrency::streams::istream stream = concurrency::streams::file_stream<unsigned char>::open_istream(filePath).get();
+            concurrency::streams::istream stream = concurrency::streams::file_stream<unsigned char>::open_istream(
+                    filePath).get();
             http_client client(uploadUrl, m_http_config);
 
             http_request req;
-            if(start == 0) {
+            if (start == 0) {
                 req.set_body(stream, fileSize, mimeType);
-            }else{
+            } else {
                 stream.seek(start);
-                req.set_body(stream, fileSize-start, mimeType);
+                req.set_body(stream, fileSize - start, mimeType);
                 std::stringstream ss;
-                ss << "bytes " << start <<"-" << fileSize-1 << "/" << fileSize;
+                ss << "bytes " << start << "-" << fileSize - 1 << "/" << fileSize;
                 req.headers()["Content-Range"] = ss.str();
             }
 
@@ -983,14 +1048,14 @@ namespace DriveFS {
                 LOG(ERROR) << resp.extract_utf8string(true).get();
                 return false;
             }
-        }catch(std::exception &e){
+        } catch (std::exception &e) {
             LOG(ERROR) << e.what();
             return false;
         }
 
     }
 
-    std::optional<int64_t> Account::getResumableUploadPoint(std::string url, size_t fileSize, int backoff){
+    std::optional<int64_t> Account::getResumableUploadPoint(std::string url, size_t fileSize, int backoff) {
         refresh_token();
 
         http_client client(url, m_http_config);
@@ -998,26 +1063,26 @@ namespace DriveFS {
         request.set_method(methods::PUT);
         http_headers &headers = request.headers();
         std::stringstream ss;
-        ss <<"bytes */"<<fileSize;
+        ss << "bytes */" << fileSize;
         headers.add("Content-Range", ss.str());
 
         http_response response = client.request(request).get();
         int status_code = response.status_code();
-        if(status_code == 404){
+        if (status_code == 404) {
             return std::nullopt;
         }
-        if(status_code == 308){
+        if (status_code == 308) {
             headers = response.headers();
             const std::string range = headers["Range"];
-            const std::regex numbers ("-(\\d+)", std::regex_constants::icase);
+            const std::regex numbers("-(\\d+)", std::regex_constants::icase);
             std::smatch match;
-            if(std::regex_search(range, match, numbers) && match.size() > 1){
-                return std::optional<int64_t>((int64_t ) std::strtoll(match.str(1).c_str(), nullptr, 10) + 1);
-            }else{
+            if (std::regex_search(range, match, numbers) && match.size() > 1) {
+                return std::optional<int64_t>((int64_t) std::strtoll(match.str(1).c_str(), nullptr, 10) + 1);
+            } else {
                 return std::optional<int64_t>(0);
             }
         }
-        if(status_code >= 400 ){
+        if (status_code >= 400) {
             LOG(ERROR) << "Failed to get start point: " << response.reason_phrase();
             LOG(ERROR) << response.extract_utf8string(true).get();
 //            LOG(ERROR) << response.headers()[""]
@@ -1025,7 +1090,7 @@ namespace DriveFS {
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
             if (backoff <= 5) {
-                return getResumableUploadPoint(url, fileSize, backoff+1);
+                return getResumableUploadPoint(url, fileSize, backoff + 1);
             }
 
         }
@@ -1034,14 +1099,14 @@ namespace DriveFS {
 
     }
 
-    bool Account::updateObjectProperties(std::string id, std::string json, int backoff){
+    bool Account::updateObjectProperties(std::string id, std::string json, int backoff) {
         http_client client(m_apiEndpoint, m_http_config);
         std::stringstream uri;
         uri << "file/" << id;
         uri_builder builder(uri.str());
 
         http_response response = client.request(methods::PATCH, builder.to_string(), json, "application/json").get();
-        if(response.status_code() != 200){
+        if (response.status_code() != 200) {
             LOG(ERROR) << "Failed to update object properties: " << response.reason_phrase();
             LOG(ERROR) << response.extract_utf8string(true).get();
 //            LOG(ERROR) << response.headers()[""]
@@ -1049,7 +1114,7 @@ namespace DriveFS {
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
             if (backoff <= 5) {
-                return updateObjectProperties(id, json, backoff+1);
+                return updateObjectProperties(id, json, backoff + 1);
             }
 
             return false;
