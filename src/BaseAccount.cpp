@@ -58,6 +58,10 @@ oauth2_code_listener::oauth2_code_listener(
                                                         ucout << "Error: " << e.what() << std::endl;
                                                         m_tce.set(false);
                                                     }
+                                                    catch (const std::exception &e) {
+                                                        ucout << "Error: " << e.what() << std::endl;
+                                                        m_tce.set(false);
+                                                    }
 
                                                 });
                                         request.reply(status_codes::OK, U("Ok."));
@@ -69,7 +73,12 @@ oauth2_code_listener::oauth2_code_listener(
                                         request.reply(status_codes::InternalError, boost::diagnostic_information(e));
                                         m_resplock.unlock();
                                         return;
-                                    };
+                                    }catch(std::exception &e){
+                                        std::cout << e.what();
+                                        m_resplock.unlock();
+                                        return;
+                                    }
+                                    ;
 
                                     m_resplock.unlock();
                                 }
