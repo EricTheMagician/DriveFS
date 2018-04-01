@@ -47,7 +47,12 @@ namespace DriveFS {
             auto driveId = changeTokens["id"];
             if (res && driveId) {
                 LOG(INFO) << "Previous change tokens founds";
-                m_newStartPageToken[driveId.get_utf8().value.to_string()] = res.get_utf8().value.to_string();
+                auto s_driveId = driveId.get_utf8().value;
+                if( s_driveId == "root") {
+                    m_newStartPageToken[std::string("")] = res.get_utf8().value.to_string();
+                }else{
+                    m_newStartPageToken[s_driveId.to_string()] = res.get_utf8().value.to_string();
+                }
             }
 
         }
@@ -303,7 +308,7 @@ namespace DriveFS {
                 settings.find_one_and_update(document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << finalize,
                                              document{} << "$set" << open_document
                                                         << "value" << m_newStartPageToken[teamDriveId]
-                                                        << "id" << teamDriveId
+                                                        << "id" << (teamDriveId.empty() ? "root" : teamDriveId)
                                                         << close_document
                                                         << finalize,
                                              find_and_upsert
@@ -669,7 +674,7 @@ namespace DriveFS {
 
 
             settings.find_one_and_update(document{} << "name" << std::string(GDRIVELASTCHANGETOKEN)
-                                                    << "id" << teamDriveId
+                                                    << "id" << (teamDriveId.empty() ? "root" : teamDriveId)
                                                     << finalize,
                                          document{} << "$set" << open_document
                                                     << "value" << m_newStartPageToken[teamDriveId]
