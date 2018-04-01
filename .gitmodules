@@ -1,3 +1,6 @@
 [submodule "external/semaphore"]
 	path = external/semaphore
 	url = https://github.com/preshing/cpp11-on-multicore
+[submodule "external/easyloggingpp"]
+	path = external/easyloggingpp
+	url = https://github.com/muflihun/easyloggingpp

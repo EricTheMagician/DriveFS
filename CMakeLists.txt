@@ -9,9 +9,13 @@ add_executable(DriveFS
         external/semaphore/common/autoresetevent.h
         external/semaphore/common/sema.h
 
+        #easylogging
+        external/easyloggingpp/src/easylogging++.cc
+        external/easyloggingpp/src/easylogging++.h
+#        /usr/include/easylogging++.cc
+#        /usr/include/easylogging++.h
+
         # my files
-        /usr/include/easylogging++.cc
-        /usr/include/easylogging++.h
         src/main.cpp
         src/BaseFile.cpp 
         ./include/BaseFile.h
@@ -50,6 +54,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         ./external
         ./external/adaptive_time_parser
         ./external/semaphore/common
+        ./external/easyloggingpp/src
         ./external/gdrive-cpprest-client
         ./external/gdrive-cpprest-client/api
         ./external/gdrive-cpprest-client/model
@@ -78,6 +83,10 @@ target_link_libraries(${PROJECT_NAME}
         stdc++fs
         )
 
+target_compile_definitions(${PROJECT_NAME}
+      PUBLIC
+        ELPP_THREAD_SAFE
+        )
 
 # for you complte me on vim
 SET( CMAKE_EXPORT_COMPILE_COMMANDS ON )
