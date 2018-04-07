@@ -9,7 +9,7 @@
 #include "FolderIO.h"
 #include <easylogging++.h>
 #include <algorithm>
-
+#include <linux/fs.h>
 namespace DriveFS{
 
 
@@ -32,27 +32,28 @@ namespace DriveFS{
     }
 
     void lookup(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
-        SFAsync([=] {
+//        SFAsync([=] {
             GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
             if(!parent){
                 fuse_reply_err(req, ENOENT);
                 return;
             }
             for (auto child: parent->children) {
-                if (child->getName().compare(name) == 0) {
+                if (child->getName() == name) {
                     struct fuse_entry_param e;
                     memset(&e, 0, sizeof(e));
                     e.attr = child->attribute;
                     e.ino = e.attr.st_ino;
                     e.attr_timeout = 18000.0;
                     e.entry_timeout = 18000.0;
+                    e.generation = 1;
                     child->lookupCount.fetch_add(1, std::memory_order_relaxed);
                     fuse_reply_entry(req, &e);
                     return;
                 }
             }
             fuse_reply_err(req, ENOENT);
-        });
+//        });
     }
 
     void forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup){
@@ -80,14 +81,12 @@ namespace DriveFS{
     }
 
     void getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        SFAsync([=] {
             GDriveObject object(getObjectFromInodeAndReq(req, ino));
             if (object) {
                 fuse_reply_attr(req, &(object->attribute), 180.0);
                 return;
             }
             fuse_reply_err(req, ENOENT);
-        });
     }
 
     void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi){
@@ -239,23 +238,55 @@ namespace DriveFS{
         auto parent = getObjectFromInodeAndReq(req, parent_ino);
         auto child = parent->findChildByName(name);
 
-        if(parent_ino != newparent_ino){
+        bool newParents = parent_ino != newparent_ino;
+        GDriveObject newParent;
+        if(flags & RENAME_EXCHANGE){
+            LOG(ERROR) << "Renaming: cannot attomically rename files";
+            fuse_reply_err(req, EINVAL);
+            return;
+        }
+        if(newParents){
+            newParent = getObjectFromInodeAndReq(req, newparent_ino);
+            auto oldChild = newParent->findChildByName(name);
+            if(oldChild){
+                if(RENAME_NOREPLACE & flags){
+                    fuse_reply_err(req, EEXIST);
+                    return;
+                }else{
+                    LOG(INFO) << "Renaming: removing preexisting file ("<< name<<") from parent " << parent->getName();
+                    oldChild->trash();
+                }
+            }
+            LOG(INFO) << "Renaming: Mving file ("<< name<<") from " << parent->getName() << " to " << newParent->getName();
             parent->removeChild(child);
-            auto newParent = getObjectFromInodeAndReq(req, newparent_ino);
             newParent->addChild(child);
         }
 
-        child->setName(name);
+        if(child->getName() != newname) {
+            LOG(INFO) << "Renaming: file from ("<< name<<") to " << newname;
+            child->setName(newname);
+        }
+
         if(child->getIsUploaded()){
             auto account = getAccount(req);
-            const bool status = account->updateObjectProperties(child->getId(), bsoncxx::to_json(child->to_bson()));
+
+            bool status = false;
+            if(newParents) {
+                status = account->updateObjectProperties(child->getId(),
+                                                         bsoncxx::to_json(child->to_rename_bson()),
+                                                         newParent->getId(), parent->getId()
+                );
+            } else {
+                status = account->updateObjectProperties(child->getId(),
+                                                                    bsoncxx::to_json(child->to_rename_bson()));
+            }
             if(!status){
                 fuse_reply_err(req, EIO);
                 return;
             }
         }
 
-        fuse_reply_attr(req, &(child->attribute), 18000.0);
+        fuse_reply_err(req, 0);
 
     }
 
@@ -285,13 +316,24 @@ namespace DriveFS{
 //        SFAsync([=]{buf->si
             FileIO * io = (FileIO *) fi->fh;
             if(io == nullptr){
+                LOG(ERROR) << "io was null when reading file";
                 fuse_reply_err(req, EIO);
                 return;
             }
+
+        VLOG(10) << "Reading size " << size << " with off " << off << " and " <<  ((size + off <= io->m_file->getFileSize()) ? "<=" : ">");
+        if( (size + off) > io->m_file->getFileSize() ){
+            size = io->m_file->getFileSize() - off;
+            VLOG(10) << "adjusting size to " << size << " and file size "<< io->m_file->getFileSize();
+        }
             auto buf = io->read(size, off);
             auto outsize = buf->size();
 
-            fuse_reply_buf(req, (const char *) buf->data(), buf->size());
+        if(outsize != size){
+            LOG(TRACE) << "buffer size was not the same as expected: " << outsize << " vs " << size;
+        }
+
+            fuse_reply_buf(req, (const char *) buf->data(), outsize);
             delete buf;
 //        });
     }
@@ -433,7 +475,6 @@ namespace DriveFS{
     void fsync(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
 
     void opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        SFAsync([=] {
             GDriveObject object = getObjectFromInodeAndReq(req, ino);
             if(! object->getIsFolder()){
                 fuse_reply_err(req, ENOTDIR);
@@ -448,7 +489,6 @@ namespace DriveFS{
 
 
             fuse_reply_open(req, fi);
-        });
     }
 
     void readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
@@ -656,6 +696,7 @@ namespace DriveFS{
         ops.listxattr = listxattr;
         ops.getxattr = getxattr;
         ops.setattr = setattr;
+        ops.rename = rename;
 
         return ops;
     }

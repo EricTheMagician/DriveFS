@@ -47,17 +47,15 @@ namespace DriveFS{
 
     std::map<ino_t, GDriveObject> _Object::inodeToObject;
     std::map<std::string, GDriveObject> _Object::idToObject;
-    PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(BLOCK_DOWNLOAD_SIZE, 512*1024*1024);
+    PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(BLOCK_DOWNLOAD_SIZE, 64*1024*1024);
 
-    _Object::_Object():File(), m_buffers(nullptr), heap_handles(nullptr), isUploaded(false){
+    _Object::_Object():File(), isUploaded(false){
     }
 
     _Object::_Object(ino_t ino, const std::string &id, const char *name, mode_t mode, bool isFile):
             File(name),
             isFolder(!isFile),
             isTrashable(true), canRename(true),
-            m_buffers(nullptr),
-            heap_handles(nullptr),
             trashed(false)
     {
         memset(&attribute, 0, sizeof(struct stat));
@@ -137,8 +135,8 @@ namespace DriveFS{
         isUploaded = that.isUploaded;
     }
 
-    _Object::_Object(ino_t ino, bsoncxx::document::view document):File(), m_buffers(nullptr), heap_handles(nullptr),
-        isUploaded(true)
+    _Object::_Object(ino_t ino, bsoncxx::document::view document):File(),
+        isUploaded(true), starred(false)
     {
         attribute.st_ino = ino;
         attribute.st_blksize = 1;
@@ -177,7 +175,7 @@ namespace DriveFS{
                 isUploaded = false;
             }
 
-            createVectorsForBuffers();
+//            createVectorsForBuffers();
 
         }
 
@@ -467,15 +465,27 @@ namespace DriveFS{
         return doc.extract();
     }
 
+    bsoncxx::document::value _Object::to_rename_bson() const {
+
+        bsoncxx::builder::stream::document doc;
+        doc << "name" << m_name ;
+        return doc.extract();
+    }
+
+
     bool _Object::removeChild(GDriveObject child){
         m_event.wait();
-        children.erase(std::find(children.begin(),children.end(), child));
+        auto found = std::find(children.begin(),children.end(), child);
+        if(found != children.end())
+            children.erase(found);
         m_event.signal();
     }
 
     bool _Object::removeParent(GDriveObject parent){
         m_event.wait();
-        parents.erase(std::find(parents.begin(),parents.end(), parent));
+        auto found = std::find(parents.begin(),parents.end(), parent);
+        if(found != parents.end())
+            parents.erase(found);
         m_event.signal();
     }
 

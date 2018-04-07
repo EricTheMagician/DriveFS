@@ -13,22 +13,10 @@ class File{
 public:
     static struct fuse_session *session;
     struct stat attribute;
-    File():m_event(1), lookupCount(0), m_buffers(nullptr){}
+    File():m_buffers(nullptr), heap_handles(nullptr), m_event(1), lookupCount(0){}
     File(const char *name):m_event(1), lookupCount(0), m_name(name), m_buffers(nullptr){}
     inline size_t getFileSize() const { return attribute.st_size; }
-    inline void create_heap_handles(size_t write_buffer_size){
-        if(m_buffers == nullptr){
-            auto count = (getFileSize() + write_buffer_size)/write_buffer_size;
-            m_buffers = new std::vector<WeakBuffer>(count);
-
-        }else {
-            auto count = (getFileSize() + write_buffer_size) / write_buffer_size;
-            if(count * write_buffer_size < getFileSize()){
-                m_buffers->resize(count);
-            }
-        }
-    }
-
+    void create_heap_handles(size_t write_buffer_size);
 public:
     std::vector<WeakBuffer> *m_buffers; // a vector pointing to possible download m_buffers
     std::vector<heap_handle> *heap_handles;

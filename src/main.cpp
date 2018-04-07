@@ -55,6 +55,7 @@ int main(int argc, char **argv) {
     fuse_daemonize(opts.foreground);
 
     /* Block until ctrl+c or fusermount -u */
+    LOG(INFO) << "Starting the filesystem";
     if(opts.singlethread){
         fuse_session_loop(session);
     }else {

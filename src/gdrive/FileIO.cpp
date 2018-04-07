@@ -6,10 +6,12 @@
 #include <thread>
 #include <cpprest/http_client.h>
 #include <easylogging++.h>
-#include <experimental/filesystem>
+#include <boost/asio/thread_pool.hpp>
+#include <boost/asio.hpp>
+
+
 using namespace web::http::client;          // HTTP client features
 using Object = DriveFS::_Object;
-namespace fs = std::experimental::filesystem;
 
 inline uint64_t getChunkStart(uint64_t start, uint64_t buffer_size){
     uint64_t chunkNumber = start / buffer_size;
@@ -20,9 +22,11 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
     return  start / buffer_size;
 
 }
-
+static boost::asio::thread_pool DownloadPool;
 namespace DriveFS{
     size_t FileIO::write_buffer_size = BLOCK_DOWNLOAD_SIZE;
+    fs::path FileIO::downloadPath = (fs::path(CACHEPATH) / std::string("download")).string();
+
     FileIO::FileIO(GDriveObject object, int flag, Account *account):
             m_account(account),
             m_file(std::move(object)),
@@ -39,7 +43,6 @@ namespace DriveFS{
     {
         setFileName();
         assert(m_readable || m_writeable || flag == 0);
-
     }
 
     FileIO::~FileIO(){
@@ -88,7 +91,7 @@ namespace DriveFS{
         req.set_method(methods::GET);
         req.set_request_uri(builder.to_uri());
 
-        LOG(DEBUG) << req.headers()["Range"];
+        VLOG(10) << req.headers()["Range"];
         http_response  resp = client.request(req).get();
         if(resp.status_code() != 206 && resp.status_code() != 200){
             LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
@@ -104,6 +107,15 @@ namespace DriveFS{
 
         cache->buffer = new std::vector<unsigned char>(resp.extract_vector().get());
         cache->event.signal();
+
+        //write buffer to disk
+        fs::path path = downloadPath / cacheName;
+        FILE *fp = fopen(path.string().c_str(), "wb");
+        if(fp != nullptr){
+            fwrite(cache->buffer->data(), sizeof(unsigned char), cache->buffer->size(), fp);
+            fclose(fp);
+        }
+
     }
 
     void FileIO::create_write_buffer(){
@@ -136,6 +148,7 @@ namespace DriveFS{
         DownloadItem item;
 //        LOG(INFO) << "Calling wait " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.wait();
+        m_file->create_heap_handles(write_buffer_size);
 //        LOG(INFO) << "Calling signal " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.signal();
         auto buffer = new std::vector<unsigned char>(size, 0);
@@ -207,6 +220,9 @@ namespace DriveFS{
         bool done = chunksToDownload.empty();
         int off2 = off % write_buffer_size;
         if( off2 >= BLOCKREADAHEADSTART && off2 <= BLOCKREADAHEADFINISH ){
+            if(chunkNumber == 0){
+                chunksToDownload.push_back(getChunkNumber(m_file->getFileSize()-1, write_buffer_size));
+            }
             uint64_t start = chunkStart;
             start += spillOver ? 2*write_buffer_size : write_buffer_size;
             uint64_t temp = 0;
@@ -217,33 +233,54 @@ namespace DriveFS{
                 }
                 chunksToDownload.push_back(temp/write_buffer_size);
             }
+
         }
 
         if(!chunksToDownload.empty()){
             m_file->m_event.wait();
-            m_file->create_heap_handles(write_buffer_size);
+//            m_file->create_heap_handles(write_buffer_size);
             for (auto _chunkNumber: chunksToDownload) {
                 auto start = _chunkNumber*write_buffer_size;
                 ss.str(std::string());
                 ss << m_file->getId();
-                ss << "\t";
+                ss << "-";
                 ss << start;
-                cacheName = ss.str();
+                std::string cacheName2(ss.str());
                 DownloadItem item = m_file->m_buffers->at(_chunkNumber).lock();
                 if ( !(item) || item->isInvalid){
                     DownloadItem cache = std::make_shared<__no_collision_download__>();
                     cache->last_access = time(NULL);
-                    cache->name = cacheName;
+                    cache->name = cacheName2;
 
                     auto chunkSize = (_chunkNumber +1)*write_buffer_size >= m_file->getFileSize() ?
-                                     m_file->getFileSize() - chunkNumber*write_buffer_size : write_buffer_size;
-                     Object::cache.insert(m_file, _chunkNumber, chunkSize, cache);
-//                    void FileIO::download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
+                                     m_file->getFileSize() - _chunkNumber*write_buffer_size : write_buffer_size;
+                    cache->size = chunkSize;
+                    Object::cache.insert(m_file, _chunkNumber, chunkSize, cache);
+//                    void FileIO::download(DownloadItem cache, std::string cacheName2, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
                     (*m_file->m_buffers)[_chunkNumber] = cache;
 
-                    cache->future = std::async(std::launch::async, &FileIO::download, this,  cache, cacheName,
-                                           start, start + write_buffer_size - 1, 0);
+                    fs::path path(downloadPath);
+                    path /= std::string(cacheName2);
+                    if(fs::exists(path)){
+                        FILE *fp = fopen(path.string().c_str(), "r");
+                        if(fp != nullptr){
 
+                            auto fsize = fs::file_size(path);
+                            auto buf = new std::vector<unsigned char>(fsize);
+                            fread(buf->data(), sizeof(unsigned char), buf->size(), fp);
+                            fclose(fp);
+                            cache->buffer = buf;
+                            continue;
+                        }
+
+                    }
+
+
+                    boost::asio::defer(DownloadPool,
+                                      [this, cache, start, chunkSize]()->void
+                                      {
+                                          this->download( cache, cache->name, start, start + chunkSize - 1, 0);
+                                      });
                 }
             }
             m_file->m_event.signal();
@@ -262,6 +299,7 @@ namespace DriveFS{
 
     void FileIO::setFileName(){
         fs::path file_location(CACHEPATH);
+        file_location /= std::string("upload");
         file_location /= m_file->getId();
         f_name = file_location.string();
     }
@@ -277,11 +315,11 @@ namespace DriveFS{
             create_write_buffer2();
         }
         else if(m_readable) {
-//            if (m_file->isUploaded()) {
-//                //file is not cached on the hdd
-//                b_is_cached = false;
-//                return;
-//            }
+            if (m_file->getIsUploaded()) {
+                //file is not cached on the hdd
+                b_is_cached = false;
+                return;
+            }
 
             stream.open(f_name.c_str());
         }

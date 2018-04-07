@@ -14,6 +14,7 @@
 
 
 #include "gdrive/Account.h"
+#include <boost/filesystem.hpp>
 #include "DownloadBuffer.h"
 #include <iostream>
 #include <fstream>
@@ -23,6 +24,7 @@
 #include <string_view>
 #include <atomic>
 #include <autoresetevent.h>
+#include <experimental/filesystem>
 
 #define MAX_CACHE_SIZE  (768*1024*1024) //(768*1024*1024) //2GB
 #define BLOCK_DOWNLOAD_SIZE (1048576L *2L) //1MB
@@ -32,7 +34,7 @@
 #define BLOCKREADAHEADSTART 262144L
 #define BLOCKREADAHEADFINISH 393216L
 
-
+namespace fs = std::experimental::filesystem;
 
 namespace DriveFS {
 
@@ -45,6 +47,8 @@ namespace DriveFS {
 
     public:
         static size_t write_buffer_size;
+        static fs::path downloadPath;
+        static bool download_last_chunk_at_the_beginning;
         FileIO(GDriveObject object, int flag, Account *account);
 
         ~FileIO();
@@ -81,7 +85,7 @@ namespace DriveFS {
         std::vector<unsigned char> * getFromCache(const size_t &size, const off_t &off);
         void upload();
 
-        std::string f_name;
+        std::string f_name; //f_name for the upload, d_name is the base download name
         GDriveObject m_file;
         bool b_is_uploading;
         bool b_is_cached;

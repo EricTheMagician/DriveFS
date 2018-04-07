@@ -9,6 +9,7 @@
 #include <pplx/pplxtasks.h>
 #include <gdrive/FileIO.h>
 #include <regex>
+#include <boost/asio/thread_pool.hpp>
 
 //using namespace utility;
 //using namespace web;
@@ -46,7 +47,7 @@ namespace DriveFS {
             auto res = changeTokens["value"];
             auto driveId = changeTokens["id"];
             if (res && driveId) {
-                LOG(INFO) << "Previous change tokens founds";
+                    LOG(INFO) << "Previous change tokens founds";
                 auto s_driveId = driveId.get_utf8().value;
                 if( s_driveId == "root") {
                     m_newStartPageToken[std::string("")] = res.get_utf8().value.to_string();
@@ -142,9 +143,9 @@ namespace DriveFS {
                           << pageToken;
                 uriBuilder.append_query("teamDriveId", teamDriveId);
             }
+            uriBuilder.append_query("includeTeamDriveItems", "true");
             uriBuilder.append_query("pageToken", pageToken);
             uriBuilder.append_query("pageSize", 1000);
-            uriBuilder.append_query("includeTeamDriveItems", "true");
             uriBuilder.append_query("supportsTeamDrives", "true");
             uriBuilder.append_query("spaces", "drive");
             uriBuilder.append_query("fields", "changes,nextPageToken,newStartPageToken");
@@ -159,12 +160,30 @@ namespace DriveFS {
             mongocxx::bulk_write documents;
             bsoncxx::document::value doc = bsoncxx::from_json(response.extract_utf8string().get());
             bsoncxx::document::view value = doc.view();
+            //get next page token
+            bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
+            if (nextPageTokenField) {
+                auto temp = nextPageTokenField.get_utf8().value.to_string();
+                if (!temp.empty()) {
+                    m_newStartPageToken[teamDriveId] = std::move(temp);
+                }
+            }
+
+            //get new start page token
+            bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
+            if (newStartPageToken) {
+                auto temp = newStartPageToken.get_utf8().value.to_string();
+                if (!temp.empty() && temp != pageToken) {
+                    m_newStartPageToken[teamDriveId] = std::move(temp);
+                }
+            }
 
             bool needs_updating = false;
 
             auto eleChanges = value["changes"];
             auto toDelete = bsoncxx::builder::basic::array{};
             bool hasItemsToDelete = false;
+            // parse files
             if (eleChanges) {
                 bsoncxx::array::view changes = eleChanges.get_array().value;
                 int count = 0;
@@ -305,10 +324,11 @@ namespace DriveFS {
                 }
 
 
-                settings.find_one_and_update(document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << finalize,
+                settings.find_one_and_update(document{} << "name" << std::string(GDRIVELASTCHANGETOKEN)
+                                                     << "id" << (teamDriveId.empty() ? "root" : teamDriveId)
+                                                     << finalize,
                                              document{} << "$set" << open_document
                                                         << "value" << m_newStartPageToken[teamDriveId]
-                                                        << "id" << (teamDriveId.empty() ? "root" : teamDriveId)
                                                         << close_document
                                                         << finalize,
                                              find_and_upsert
@@ -318,24 +338,6 @@ namespace DriveFS {
 //                m_account->updateCache();
             }
 
-            // parse files
-            //get next page token
-            bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
-            if (nextPageTokenField) {
-                auto temp = nextPageTokenField.get_utf8().value.to_string();
-                if (!temp.empty()) {
-                    m_newStartPageToken[teamDriveId] = std::move(temp);
-                }
-            }
-
-            //get new start page token
-            bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
-            if (newStartPageToken) {
-                auto temp = newStartPageToken.get_utf8().value.to_string();
-                if (!temp.empty() && temp != pageToken) {
-                    m_newStartPageToken[teamDriveId] = std::move(temp);
-                }
-            }
 
             if (nextPageTokenField) {
                 background_update(teamDriveId, true);
@@ -515,6 +517,7 @@ namespace DriveFS {
 
         refresh_token();
         LOG(INFO) << "Getting updated list of files and folders";
+        LOG(DEBUG) << "teamDriveId " << (teamDriveId.empty() ? "root" : teamDriveId) << " and token " << nextPageToken;
 
         http_client client(m_apiEndpoint, m_http_config);
         uri_builder uriBuilder("changes");
@@ -1104,11 +1107,17 @@ namespace DriveFS {
 
     }
 
-    bool Account::updateObjectProperties(std::string id, std::string json, int backoff) {
+    bool Account::updateObjectProperties(std::string id, std::string json, std::string addParents, std::string removeParents, int backoff) {
         http_client client(m_apiEndpoint, m_http_config);
         std::stringstream uri;
-        uri << "file/" << id;
+        uri << "files/" << id;
         uri_builder builder(uri.str());
+        builder.append_query("supportsTeamDrives", "true");
+        if(!addParents.empty())
+            builder.append_query("addParents", addParents);
+
+        if(!removeParents.empty())
+            builder.append_query("removeParents", removeParents);
 
         http_response response = client.request(methods::PATCH, builder.to_string(), json, "application/json").get();
         if (response.status_code() != 200) {
@@ -1119,7 +1128,7 @@ namespace DriveFS {
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
             if (backoff <= 5) {
-                return updateObjectProperties(id, json, backoff + 1);
+                return updateObjectProperties(id, json, addParents, removeParents, backoff + 1);
             }
 
             return false;
