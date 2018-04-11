@@ -24,7 +24,7 @@
 #include <string_view>
 #include <atomic>
 #include <autoresetevent.h>
-#include <experimental/filesystem>
+#include <boost/filesystem.hpp>
 
 #define MAX_CACHE_SIZE  (768*1024*1024) //(768*1024*1024) //2GB
 #define BLOCK_DOWNLOAD_SIZE (1048576L *2L) //1MB
@@ -34,7 +34,7 @@
 #define BLOCKREADAHEADSTART 262144L
 #define BLOCKREADAHEADFINISH 393216L
 
-namespace fs = std::experimental::filesystem;
+namespace fs = boost::filesystem;
 
 namespace DriveFS {
 

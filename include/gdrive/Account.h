@@ -42,7 +42,7 @@ namespace DriveFS {
 
         Account(const std::string &access_tokoen, const std::string &refresh_token);
 
-        static Account getAccount();
+        static Account getAccount(std::string uri);
         inline ino_t getNextInode(){
             return inode_count.fetch_add(1, std::memory_order_acquire)+1;
         }

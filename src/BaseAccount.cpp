@@ -13,8 +13,6 @@ using namespace web::http::client;
 using namespace web::http::oauth2::experimental;
 using namespace web::http::experimental::listener;
 
-mongocxx::pool pool(  std::move(mongocxx::uri("mongodb://localhost/") ) );
-
 //Some of the code is copied from microsoft's cpprest sdk which is licensed under MIT
 
 //

@@ -16,7 +16,6 @@ using namespace web::http;
 using namespace web::http::client;
 using namespace web::http::oauth2::experimental;
 using namespace web::http::experimental::listener;
-extern mongocxx::pool pool; //pool(  std::move(mongocxx::uri("mongodb://localhost?minPoolSize=4&maxPoolSize=16") ) );
 
 class oauth2_code_listener
 {
@@ -59,6 +58,7 @@ protected:
     virtual void loadFilesAndFolders() = 0;
     pplx::task<bool> authorization_code_flow();
 
+    mongocxx::pool pool;
     oauth2_config m_oauth2_config;
     http_client_config m_http_config;
     std::unique_ptr<oauth2_code_listener> m_listener;

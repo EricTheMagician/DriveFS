@@ -1,10 +1,14 @@
 #include <iostream>
+#include "BaseAccount.h"
 #include "gdrive/Account.h"
 #include "gdrive/Filesystem.h"
 #include <easylogging++.h>
+#include <boost/program_options.hpp>
+namespace po = boost::program_options;
+
 INITIALIZE_EASYLOGGINGPP;
 
-int main(int argc, char **argv) {
+int main(int argc, const char **argv) {
 
     const char *v1 = "DriveFS\0";
     const char *v2 =  "-v\0";
@@ -16,23 +20,59 @@ int main(int argc, char **argv) {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
 
+    po::options_description desc("Allowed options");
+    desc.add_options()
+            ("help", "this help message")
+            ("mount", po::value<std::string>(), "set the mount point")
+            ("database", po::value<std::string>()->default_value("mongodb://localhost/"), "set the database path")
+            ("fuse-foreground,f", "run the fuse application in foreground instead of a daemon")
+            ("fuse-debug,d", "run the fuse application in debug mode")
+            ("fuse-allow-other", "set the allow-other-option for fuse")
+            ("fuse-singlethread,s", "use a single thread for the fuse event loop")
+            ("log-location", po::value<std::string>()->default_value("/tmp/DriveFS.log"))
+            ;
+
+    po::positional_options_description p;
+    p.add("mount", 1).add("other",-1);
+
+    po::variables_map vm;
+    po::store(po::command_line_parser(argc, argv).
+            options(desc).positional(p).run(), vm);
+    po::notify(vm);
+
     defaultConf.setGlobally(
-//            el::ConfigurationType::Format, "%datetime [%levshort] %thread [%fbase:%line] %msg");
-            el::ConfigurationType::Format, "%datetime [%levshort] [%fbase:%line] %msg");
+            el::ConfigurationType::Format, "%datetime [%levshort] [%fbase:%line] %msg"
+    );
     defaultConf.parseFromText("*GLOBAL:\nTO_FILE = true\nFilename = \"/tmp/DriveFS.log\"\nMax_Log_File_Size = 104857600"); // 100MB rorate log sizes
     el::Loggers::reconfigureAllLoggers(defaultConf);
     el::Loggers::reconfigureLogger("default", defaultConf);
     el::Loggers::addFlag(el::LoggingFlag::ColoredTerminalOutput);
-
-    DriveFS::Account account = DriveFS::Account::getAccount();
+    vm["database"];
+    DriveFS::Account account = DriveFS::Account::getAccount(
+            vm["database"].as<std::string>() 
+    );
     if(account.needToInitialize()) {
         account.run();
     }
 
     struct fuse_session *session;
-    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-    const char *temp = "GDriveFS";
-    const char* fsName = strdup(temp);
+    std::vector<const char *>fuse_args;
+
+    auto filesystemName = "DriveFS";
+    fuse_args.push_back(&filesystemName[0]);
+    auto mountpoint = vm["mount"].as<std::string>();
+    fuse_args.push_back(mountpoint.c_str());
+    if(vm.count("fuse-foreground")){
+        fuse_args.push_back("-f");
+    }
+    if(vm.count("fuse-debug")){
+        fuse_args.push_back("-d");
+    }
+    if(vm.count("fuse-allow-other")){
+        fuse_args.push_back("--allow-other");
+    }
+
+    struct fuse_args args = FUSE_ARGS_INIT(fuse_args.size(), (char**)fuse_args.data());
     struct fuse_cmdline_opts opts;
     if( fuse_parse_cmdline(&args, &opts) != 0){
         return -1;

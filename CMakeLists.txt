@@ -4,6 +4,7 @@ project(DriveFS CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS -std=c++17)
 
+
 add_executable(DriveFS
         # semaphore
         external/semaphore/common/autoresetevent.h
@@ -44,11 +45,10 @@ target_compile_definitions(${PROJECT_NAME}
         _FILE_OFFSET_BITS=64
         FUSE_USE_VERSION=31)
 
-find_package(PkgConfig REQUIRED)
 
 #add search for libbson
+find_package(PkgConfig REQUIRED)
 pkg_search_module(LIBBSON REQUIRED libbson-1.0)
-pkg_search_module(LIBFUSE3 REQUIRED fuse3)
 target_include_directories(${PROJECT_NAME} PUBLIC
         ./include
         ./external
@@ -61,7 +61,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         /usr/include/openssl-1.0
         /usr/local/include/mongocxx/v_noabi
         /usr/local/include/bsoncxx/v_noabi
-        ${LIBFUSE3_INCLUDE_DIRS}
         )
 #set(CMAKE_MODULE_PATH /usr/local/include/mongocxx/v_noabi/mongocxx/cmake)
 #find_package(mongocxx REQUIRED)
@@ -69,7 +68,8 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 
 
 SET(Boost_USE_MULTITHREAD ON)
-find_package(Boost COMPONENTS thread system REQUIRED)
+find_package(PkgConfig REQUIRED)
+find_package(Boost COMPONENTS thread system program_options filesystem REQUIRED)
 find_library(LIBCRYPTO libcrypto.so.1.0.0)
 find_library(LIBSSL libssl.so.1.0.0)
 target_link_libraries(${PROJECT_NAME}
@@ -79,14 +79,23 @@ target_link_libraries(${PROJECT_NAME}
         ${LIBCRYPTO}
         ${LIBSSL}
         mongocxx bsoncxx
-        ${LIBFUSE3_LIBRARIES}
-        stdc++fs
         )
 
 target_compile_definitions(${PROJECT_NAME}
       PUBLIC
         ELPP_THREAD_SAFE
         )
+
+
+#lib fuse3
+find_package(PkgConfig REQUIRED)
+pkg_search_module(LIBFUSE3 REQUIRED fuse3)
+target_link_libraries(${PROJECT_NAME}
+        ${LIBFUSE3_LIBRARIES}
+        )
+target_include_directories(${PROJECT_NAME}
+        PUBLIC         ${LIBFUSE3_INCLUDE_DIRS})
+
 
 # for you complte me on vim
 SET( CMAKE_EXPORT_COMPILE_COMMANDS ON )

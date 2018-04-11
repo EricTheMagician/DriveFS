@@ -100,11 +100,14 @@ namespace DriveFS {
 
     }
 
-    Account Account::getAccount() {
+    Account Account::getAccount(std::string suri) {
         LOG(TRACE) << "Getting Account";
-        mongocxx::pool::entry conn = pool.acquire();
-        mongocxx::database client = conn->database(std::string(DATABASENAME));
-        mongocxx::collection db = client[std::string(DATABASESETTINGS)];
+
+        mongocxx::uri  uri(suri);
+        mongocxx::client client(uri);
+//        mongocxx::database client = client[std::string(DATABASENAME)];
+//        mongocxx::collection db = client[std::string(DATABASESETTINGS)];
+        mongocxx::collection db = client[std::string(DATABASENAME)][std::string(DATABASESETTINGS)];
 
         auto maybeResult = db.find_one(
                 document{} << "name" << std::string(GDRIVETOKENNAME) << finalize
@@ -989,7 +992,7 @@ namespace DriveFS {
             location = resp.headers()["Location"];
         }
 
-        SFAsync([location, file] {
+        SFAsync([location, file, this] {
 
             mongocxx::pool::entry conn = pool.acquire();
             mongocxx::database dbclient = conn->database(std::string(DATABASENAME));
