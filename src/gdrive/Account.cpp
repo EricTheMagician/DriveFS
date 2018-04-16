@@ -22,7 +22,8 @@ static mongocxx::options::find_one_and_update find_and_upsert;
 
 namespace DriveFS {
 
-    Account::Account() : BaseAccount(
+    Account::Account(std::string dbUri) : BaseAccount(
+            dbUri,
             "https://www.googleapis.com/drive/v3/",
             "126857315828-tj5cie9scsk0b5edmakl266p7pis80ts.apps.googleusercontent.com",
             "wxvtZ_SZpmEKXSB0kITXYx6C",
@@ -59,7 +60,7 @@ namespace DriveFS {
         }
     }
 
-    Account::Account(const std::string &at, const std::string &rt) : Account() {
+    Account::Account(std::string dbUri, const std::string &at, const std::string &rt) : Account(dbUri) {
         m_refresh_token = rt;
         auto token = m_oauth2_config.token();
         m_oauth2_config.set_bearer_auth(true);
@@ -120,10 +121,10 @@ namespace DriveFS {
                     rt(res["refresh_token"].get_utf8().value.to_string());
 
             if (!at.empty() && !rt.empty())
-                return Account(at, rt);
+                return Account(suri, at, rt);
 
         }
-        return Account();
+        return Account(suri);
     }
 
     void Account::background_update(std::string teamDriveId, bool skip_sleep) {
@@ -279,20 +280,33 @@ namespace DriveFS {
                                     GDriveObject parent = cursor->second;
                                     parent->addChild(file);
                                     file->addParent(parent);
+#if FUSE_USE_VERSION >= 30
                                     fuse_lowlevel_notify_inval_inode(this->fuse_session, parent->attribute.st_ino, 0,
                                                                      0);
+#else
+                                    fuse_lowlevel_notify_inval_inode(this->fuse_channel, parent->attribute.st_ino, 0,
+                                                                     0);
+#endif
+
                                 }
                             }
                         }
 
                         //invalidate old parents
                         for (const auto &parent: oldParents) {
+#if FUSE_USE_VERSION >= 30
                             fuse_lowlevel_notify_inval_inode(this->fuse_session, parent->attribute.st_ino, 0, 0);
+#else
+                            fuse_lowlevel_notify_inval_inode(this->fuse_channel, parent->attribute.st_ino, 0, 0);
+#endif
                         }
 
                         // notify the kernel that the inode is invalid.
+#if FUSE_USE_VERSION >= 30
                         fuse_lowlevel_notify_inval_inode(this->fuse_session, file->attribute.st_ino, -1, 0);
-
+#else
+                        fuse_lowlevel_notify_inval_inode(this->fuse_channel, file->attribute.st_ino, -1, 0);
+#endif
                     } else {
                         auto inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
                         auto file = std::make_shared<DriveFS::_Object>(inode, fileDoc);

@@ -8,13 +8,21 @@
 #include <fuse_lowlevel.h>
 #include <autoresetevent.h>
 #include "DownloadBuffer.h"
+#include <unistd.h>
+
 class File{
 
 public:
     static struct fuse_session *session;
+    static uid_t executing_uid;
+    static gid_t executing_gid;
     struct stat attribute;
-    File():m_buffers(nullptr), heap_handles(nullptr), m_event(1), lookupCount(0){}
-    File(const char *name):m_event(1), lookupCount(0), m_name(name), m_buffers(nullptr){}
+    File():m_buffers(nullptr), heap_handles(nullptr), m_event(1), lookupCount(0){
+        memset(&attribute, 0, sizeof(struct stat));
+    }
+    File(const char *name):m_event(1), lookupCount(0), m_name(name), m_buffers(nullptr){
+        memset(&attribute, 0, sizeof(struct stat));
+    }
     inline size_t getFileSize() const { return attribute.st_size; }
     void create_heap_handles(size_t write_buffer_size);
 public:

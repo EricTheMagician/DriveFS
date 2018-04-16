@@ -63,7 +63,6 @@ typedef typename boost::heap::fibonacci_heap<DownloadItem, boost::heap::compare<
 typedef fibHeap::handle_type heap_handle;
 template <class file_t>
 class PriorityCache{
-    const size_t maxCacheSize;
 public:
     PriorityCache(size_t block_download_size, size_t max_cache_size):
             cacheSize(0), maxCacheSize(max_cache_size),
@@ -102,11 +101,14 @@ public:
         cache->update(handle);
         sema.signal();
     }
+public:
+    size_t maxCacheSize;
+    size_t m_block_download_size;
 
 private:
     fibHeap *cache; // queue storing cached data by last access
     std::atomic<size_t> cacheSize; // total bytes of data in cache
-    const size_t m_block_download_size;
+
     AutoResetEvent sema;
 
 };

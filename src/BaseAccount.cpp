@@ -126,7 +126,8 @@ pplx::task<bool> BaseAccount::authorization_code_flow(){
     return m_listener->listen_for_code();
 }
 
-BaseAccount::BaseAccount(std::string api, std::string id, std::string secret,
+BaseAccount::BaseAccount(std::string dbUri,
+                         std::string api, std::string id, std::string secret,
                          std::string auth, std::string token, std::string redirect,
                          std::string scope):
         m_apiEndpoint(api),
@@ -135,7 +136,8 @@ BaseAccount::BaseAccount(std::string api, std::string id, std::string secret,
         m_needToInitialize(true),
         m_event(1),
         m_key(id),
-        m_token_expires_at(std::chrono::system_clock::now())
+        m_token_expires_at(std::chrono::system_clock::now()),
+        pool(mongocxx::uri(dbUri))
 {};
 
 void BaseAccount::open_browser_auth()

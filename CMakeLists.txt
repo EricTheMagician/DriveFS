@@ -18,19 +18,19 @@ add_executable(DriveFS
 
         # my files
         src/main.cpp
-        src/BaseFile.cpp 
+        src/BaseFile.cpp
         ./include/BaseFile.h
-        src/gdrive/File.cpp 
+        src/gdrive/File.cpp
         ./include/gdrive/File.h
-        src/gdrive/Filesystem.cpp 
+        src/gdrive/Filesystem.cpp
         ./include/gdrive/Filesystem.h
-        src/gdrive/Account.cpp 
+        src/gdrive/Account.cpp
         ./include/gdrive/Account.h
-        src/BaseAccount.cpp 
-        ./include/BaseAccount.h 
-        external/adaptive_time_parser/adaptive_time_parser.cpp 
-        src/gdrive/Filesystem.cpp 
-        ./include/gdrive/Filesystem.h 
+        src/BaseAccount.cpp
+        ./include/BaseAccount.h
+        external/adaptive_time_parser/adaptive_time_parser.cpp
+        src/gdrive/Filesystem.cpp
+        ./include/gdrive/Filesystem.h
         src/BaseFileSystem.cpp
         ./include/BaseFileSystem.h
         src/FolderIO.cpp
@@ -43,8 +43,20 @@ add_executable(DriveFS
 target_compile_definitions(${PROJECT_NAME}
         PUBLIC
         _FILE_OFFSET_BITS=64
-        FUSE_USE_VERSION=31)
+        )
 
+#lib fuse3
+find_package(PkgConfig REQUIRED)
+set(USE_FUSE3 0)
+if(USE_FUSE3)
+    pkg_search_module(LIBFUSE REQUIRED fuse3)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC USE_FUSE3
+            FUSE_USE_VERSION=31)
+else()
+    pkg_search_module(LIBFUSE REQUIRED fuse)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC
+            FUSE_USE_VERSION=29)
+endif()
 
 #add search for libbson
 find_package(PkgConfig REQUIRED)
@@ -61,7 +73,9 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         /usr/include/openssl-1.0
         /usr/local/include/mongocxx/v_noabi
         /usr/local/include/bsoncxx/v_noabi
+        ${LIBFUSE_INCLUDE_DIRS}
         )
+
 #set(CMAKE_MODULE_PATH /usr/local/include/mongocxx/v_noabi/mongocxx/cmake)
 #find_package(mongocxx REQUIRED)
 
@@ -72,12 +86,15 @@ find_package(PkgConfig REQUIRED)
 find_package(Boost COMPONENTS thread system program_options filesystem REQUIRED)
 find_library(LIBCRYPTO libcrypto.so.1.0.0)
 find_library(LIBSSL libssl.so.1.0.0)
+
+#add_dependencies(${PROJECT_NAME} cpprest)
 target_link_libraries(${PROJECT_NAME}
-        cpprest
+        ${LIBFUSE_LIBRARIES}
         pthread
-        ${Boost_LIBRARIES}
         ${LIBCRYPTO}
         ${LIBSSL}
+        ${Boost_LIBRARIES}
+        cpprest
         mongocxx bsoncxx
         )
 
@@ -86,22 +103,3 @@ target_compile_definitions(${PROJECT_NAME}
         ELPP_THREAD_SAFE
         )
 
-
-#lib fuse3
-find_package(PkgConfig REQUIRED)
-pkg_search_module(LIBFUSE3 REQUIRED fuse3)
-target_link_libraries(${PROJECT_NAME}
-        ${LIBFUSE3_LIBRARIES}
-        )
-target_include_directories(${PROJECT_NAME}
-        PUBLIC         ${LIBFUSE3_INCLUDE_DIRS})
-
-
-# for you complte me on vim
-SET( CMAKE_EXPORT_COMPILE_COMMANDS ON )
-IF( EXISTS "${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json" )
-  EXECUTE_PROCESS( COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-    ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
-  )
-ENDIF()

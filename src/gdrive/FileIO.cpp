@@ -24,8 +24,14 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
 }
 static boost::asio::thread_pool DownloadPool;
 namespace DriveFS{
-    size_t FileIO::write_buffer_size = BLOCK_DOWNLOAD_SIZE;
-    fs::path FileIO::downloadPath = (fs::path(CACHEPATH) / std::string("download")).string();
+    uint_fast32_t FileIO::write_buffer_size = 0,
+            FileIO::block_read_ahead_start = UINT32_MAX,
+            FileIO::block_read_ahead_end = UINT32_MAX,
+            FileIO::block_download_size=1024*1024*2;
+    uint_fast8_t FileIO::number_of_blocks_to_read_ahead = 0;
+    bool FileIO::download_last_chunk_at_the_beginning = false;
+
+    fs::path FileIO::cachePath = "/tmp";
 
     FileIO::FileIO(GDriveObject object, int flag, Account *account):
             m_account(account),
@@ -109,7 +115,7 @@ namespace DriveFS{
         cache->event.signal();
 
         //write buffer to disk
-        fs::path path = downloadPath / cacheName;
+        fs::path path = cachePath / cacheName;
         FILE *fp = fopen(path.string().c_str(), "wb");
         if(fp != nullptr){
             fwrite(cache->buffer->data(), sizeof(unsigned char), cache->buffer->size(), fp);
@@ -219,14 +225,14 @@ namespace DriveFS{
 
         bool done = chunksToDownload.empty();
         int off2 = off % write_buffer_size;
-        if( off2 >= BLOCKREADAHEADSTART && off2 <= BLOCKREADAHEADFINISH ){
-            if(chunkNumber == 0){
+        if( off2 >= FileIO::block_read_ahead_start && off2 <= FileIO::block_read_ahead_end){
+            if( (chunkNumber == 0) && FileIO::download_last_chunk_at_the_beginning){
                 chunksToDownload.push_back(getChunkNumber(m_file->getFileSize()-1, write_buffer_size));
             }
             uint64_t start = chunkStart;
             start += spillOver ? 2*write_buffer_size : write_buffer_size;
             uint64_t temp = 0;
-            for(uint64_t i = 0; i < NUM_BLOCK_READ_AHEAD; i++){
+            for(uint64_t i = 0; i < FileIO::number_of_blocks_to_read_ahead; i++){
                 temp = start + i*write_buffer_size;
                 if (temp >= fileSize){
                     break;
@@ -259,7 +265,7 @@ namespace DriveFS{
 //                    void FileIO::download(DownloadItem cache, std::string cacheName2, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
                     (*m_file->m_buffers)[_chunkNumber] = cache;
 
-                    fs::path path(downloadPath);
+                    fs::path path(cachePath);
                     path /= std::string(cacheName2);
                     if(fs::exists(path)){
                         FILE *fp = fopen(path.string().c_str(), "r");

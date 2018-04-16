@@ -47,7 +47,8 @@ namespace DriveFS{
 
     std::map<ino_t, GDriveObject> _Object::inodeToObject;
     std::map<std::string, GDriveObject> _Object::idToObject;
-    PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(BLOCK_DOWNLOAD_SIZE, 64*1024*1024);
+    PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(1,1);
+
 
     _Object::_Object():File(), isUploaded(false){
     }
@@ -76,8 +77,8 @@ namespace DriveFS{
         attribute.st_mtim = now;
         attribute.st_atim = now;
 
-        attribute.st_uid = 65534; // nobody
-        attribute.st_gid = 65534;
+        attribute.st_uid = executing_uid;
+        attribute.st_gid = executing_gid;
         isUploaded = false;
 
         m_id = id;
@@ -197,8 +198,8 @@ namespace DriveFS{
         attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value.to_string());
         attribute.st_atim = attribute.st_mtim;
         attribute.st_nlink = 1;
-        attribute.st_uid = 65534; // nobody
-        attribute.st_gid = 65534;
+        attribute.st_uid = executing_uid;
+        attribute.st_gid = executing_gid;
         updateProperties(document);
 
     }
@@ -212,10 +213,10 @@ namespace DriveFS{
         f.attribute.st_atim = now;
         f.attribute.st_mtim = now;
         f.attribute.st_ctim = now;
-        f.attribute.st_mode = S_IFDIR | 0x777;//S_IRWXU | S_IRWXG | S_IRWXO;
+        f.attribute.st_mode = S_IFDIR | 0755;
         f.attribute.st_nlink = 1;
-        f.attribute.st_uid = 65534; // nobody
-        f.attribute.st_gid = 65534;
+        f.attribute.st_uid = executing_uid;
+        f.attribute.st_gid = executing_gid;
 
         f.isFolder = true;
         std::string id(document["id"].get_utf8().value.to_string());
@@ -242,10 +243,10 @@ namespace DriveFS{
         f.attribute.st_atim = now;
         f.attribute.st_mtim = now;
         f.attribute.st_ctim = now;
-        f.attribute.st_mode = S_IFDIR | 0x555;//S_IRWXU | S_IRWXG | S_IRWXO;
+        f.attribute.st_mode = S_IFDIR | 0555;//S_IRWXU | S_IRWXG | S_IRWXO;
         f.attribute.st_nlink = 1;
-        f.attribute.st_uid = 65534; // nobody
-        f.attribute.st_gid = 65534;
+        f.attribute.st_uid = executing_uid;
+        f.attribute.st_gid = executing_gid;
 
 
         f.isFolder = true;
@@ -272,10 +273,10 @@ namespace DriveFS{
         f.attribute.st_atim = now;
         f.attribute.st_mtim = now;
         f.attribute.st_ctim = now;
-        f.attribute.st_mode = S_IFDIR | 0x777;//S_IRWXU | S_IRWXG | S_IRWXO;
+        f.attribute.st_mode = S_IFDIR | 0755;//S_IRWXU | S_IRWXG | S_IRWXO;
         f.attribute.st_nlink = 1;
-        f.attribute.st_uid = 65534; // nobody
-        f.attribute.st_gid = 65534;
+        f.attribute.st_uid = executing_uid;
+        f.attribute.st_gid = executing_gid;
         f.m_name = document["name"].get_utf8().value.to_string();
 
         f.isFolder = true;
@@ -314,7 +315,7 @@ namespace DriveFS{
             isUploaded = true;
         }else{
             isFolder = false;
-            attribute.st_mode = S_IFREG | S_IXUSR | S_IXGRP | S_IXOTH;
+            attribute.st_mode = S_IFREG | 0755;
             auto sz = document["size"];
             if(sz){
                 attribute.st_size = std::strtoll(sz.get_utf8().value.to_string().c_str(), nullptr, 10);
@@ -382,8 +383,8 @@ namespace DriveFS{
             }
         }
 
-        if(!uid_found) attribute.st_uid = 65534; // nobody
-        if(!gid_found) attribute.st_gid = 65534;
+        if(!uid_found) attribute.st_uid = executing_uid;
+        if(!gid_found) attribute.st_gid = executing_gid;
 
     }
 

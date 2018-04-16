@@ -3,7 +3,11 @@
 //
 
 #pragma once
+#ifdef USE_FUSE3
 #include <fuse3/fuse_lowlevel.h>
+#else
+#include <fuse/fuse_lowlevel.h>
+#endif
 #include <future>
 #include <functional>
 #include <type_traits>

@@ -38,9 +38,9 @@ using bsoncxx::builder::basic::kvp;
 namespace DriveFS {
     class Account: public BaseAccount {
     public:
-        Account();
+        Account(std::string dbUri);
 
-        Account(const std::string &access_tokoen, const std::string &refresh_token);
+        Account(std::string dbUri, const std::string &access_tokoen, const std::string &refresh_token);
 
         static Account getAccount(std::string uri);
         inline ino_t getNextInode(){

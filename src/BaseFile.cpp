@@ -3,6 +3,8 @@
 //
 
 #include "../include/BaseFile.h"
+uid_t File::executing_uid;
+gid_t File::executing_gid;
 
 void File::create_heap_handles(size_t write_buffer_size){
     auto count = getFileSize() / write_buffer_size + 1;

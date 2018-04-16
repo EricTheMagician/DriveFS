@@ -117,11 +117,11 @@ namespace DriveFS{
         if(to_set & FUSE_SET_ATTR_MTIME){
             file->attribute.st_mtim = attr->st_mtim;
         }
-
+#ifdef USE_FUSE3
         if(to_set & FUSE_SET_ATTR_CTIME){
             file->attribute.st_ctim = attr->st_ctim;
         }
-
+#endif
         if(to_set & FUSE_SET_ATTR_MTIME_NOW){
             file->attribute.st_mtim = {time(nullptr),0};
         }
@@ -234,28 +234,38 @@ namespace DriveFS{
 
     void symlink(fuse_req_t req, const char *link, fuse_ino_t parent, const char *name);
 
-    void rename(fuse_req_t req, fuse_ino_t parent_ino, const char *name, fuse_ino_t newparent_ino, const char *newname, unsigned int flags){
+    void rename(fuse_req_t req, fuse_ino_t parent_ino, const char *name, fuse_ino_t newparent_ino, const char *newname
+#ifdef USE_FUSE3
+            , unsigned int flags
+#endif
+    ){
         auto parent = getObjectFromInodeAndReq(req, parent_ino);
         auto child = parent->findChildByName(name);
 
         bool newParents = parent_ino != newparent_ino;
         GDriveObject newParent;
+#ifdef USE_FUSE3
         if(flags & RENAME_EXCHANGE){
             LOG(ERROR) << "Renaming: cannot attomically rename files";
             fuse_reply_err(req, EINVAL);
             return;
         }
+#endif
         if(newParents){
             newParent = getObjectFromInodeAndReq(req, newparent_ino);
             auto oldChild = newParent->findChildByName(name);
             if(oldChild){
+#ifdef USE_FUSE3
                 if(RENAME_NOREPLACE & flags){
                     fuse_reply_err(req, EEXIST);
                     return;
                 }else{
+#endif
                     LOG(INFO) << "Renaming: removing preexisting file ("<< name<<") from parent " << parent->getName();
                     oldChild->trash();
+#ifdef USE_FUSE3
                 }
+#endif
             }
             LOG(INFO) << "Renaming: Mving file ("<< name<<") from " << parent->getName() << " to " << newParent->getName();
             parent->removeChild(child);
@@ -672,6 +682,10 @@ namespace DriveFS{
     void readdirplus(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
 
     }
+    void init(void *userdata, struct fuse_conn_info *conn){
+        LOG(TRACE) << "Initializing fuse filesystem";
+    }
+
 
     fuse_lowlevel_ops getOps(){
         fuse_lowlevel_ops ops;
@@ -697,7 +711,7 @@ namespace DriveFS{
         ops.getxattr = getxattr;
         ops.setattr = setattr;
         ops.rename = rename;
-
+        ops.init = init;
         return ops;
     }
 

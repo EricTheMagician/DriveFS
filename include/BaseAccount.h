@@ -36,7 +36,7 @@ private:
 class BaseAccount {
 
 public:
-    BaseAccount(std::string api, std::string id, std::string secret, std::string auth, std::string token, std::string redirect, std::string scope);
+    BaseAccount(std::string dbUri, std::string api, std::string id, std::string secret, std::string auth, std::string token, std::string redirect, std::string scope);
     virtual ~BaseAccount();
     void run();
     inline bool needToInitialize() const {return m_needToInitialize;}
@@ -47,7 +47,12 @@ public:
 
     inline struct fuse_session * getFuseSession() const { return m_fuse_session;}
     inline void setFuseSession(struct fuse_session * session) { m_fuse_session=session;}
+
     struct fuse_session* fuse_session;
+#if FUSE_USE_VERSION < 30
+    struct fuse_chan* fuse_channel;
+#endif
+
 private:
 
     void open_browser_auth();
