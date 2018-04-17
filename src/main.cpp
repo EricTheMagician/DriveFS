@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
     DriveFS::Account account = DriveFS::Account::getAccount(
             vm["database"].as<std::string>()
     );
-    LOG(TRACE) << "database uri: " << vm["database"].as<std::string>();
+
     if(account.needToInitialize()) {
         account.run();
     }
