@@ -24,7 +24,7 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
 }
 static boost::asio::thread_pool DownloadPool;
 namespace DriveFS{
-    uint_fast32_t FileIO::write_buffer_size = 0,
+    uint_fast32_t FileIO::write_buffer_size = 4*1024*1024, //4mb
             FileIO::block_read_ahead_start = UINT32_MAX,
             FileIO::block_read_ahead_end = UINT32_MAX,
             FileIO::block_download_size=1024*1024*2;
@@ -138,11 +138,11 @@ namespace DriveFS{
 
     std::vector<unsigned char> * FileIO::getFromCache( const size_t &_size, const off_t &off ){
 
-        const uint64_t chunkNumber = getChunkNumber(off, write_buffer_size);
-        const uint64_t chunkStart = getChunkStart(off, write_buffer_size);
+        const uint64_t chunkNumber = getChunkNumber(off, block_download_size);
+        const uint64_t chunkStart = getChunkStart(off, block_download_size);
         const auto fileSize = m_file->getFileSize();
         const size_t size = _size + off > fileSize ? fileSize-off-1: _size;
-        const bool spillOver = chunkStart != getChunkStart(off+size, write_buffer_size);
+        const bool spillOver = chunkStart != getChunkStart(off+size, block_download_size);
         std::stringstream ss;
         ss << m_file->getId();
         ss<< "\t";
@@ -154,7 +154,7 @@ namespace DriveFS{
         DownloadItem item;
 //        LOG(INFO) << "Calling wait " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.wait();
-        m_file->create_heap_handles(write_buffer_size);
+        m_file->create_heap_handles(block_download_size);
 //        LOG(INFO) << "Calling signal " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.signal();
         auto buffer = new std::vector<unsigned char>(size, 0);
@@ -169,7 +169,7 @@ namespace DriveFS{
                 LOG(TRACE) << "cache was invalid for " << m_file->getName();
                 chunksToDownload.push_back(chunkNumber);
             }else {
-                const uint64_t start = off % write_buffer_size;
+                const uint64_t start = off % block_download_size;
                 const uint64_t size2 = spillOver ? item->buffer->size() - start: size;
                 spillOverPrecopy = size2;
                 assert((start+size2) <= item->buffer->size());
@@ -185,7 +185,7 @@ namespace DriveFS{
 
         if(spillOver) {
 
-            const uint64_t chunkStart2 = chunkStart + write_buffer_size;
+            const uint64_t chunkStart2 = chunkStart + block_download_size;
             const uint64_t chunkNumber2 = chunkNumber+1;
 
             ss.str(std::string());
@@ -206,7 +206,7 @@ namespace DriveFS{
                         LOG(TRACE) << "cache was invalid for " << m_file->getName();
                         chunksToDownload.push_back(chunkNumber2);
                     }else{
-                        uint64_t size2 = (off + size) % write_buffer_size;
+                        uint64_t size2 = (off + size) % block_download_size;
                         assert((spillOverPrecopy+size2) <= buffer->size());
                         memcpy( buffer->data() + spillOverPrecopy, item->buffer->data(), size2);
 //                        m_file->cache.updateAccessTime(m_file, chunkNumber2, item);
@@ -224,29 +224,29 @@ namespace DriveFS{
 
 
         bool done = chunksToDownload.empty();
-        int off2 = off % write_buffer_size;
+        int off2 = off % block_download_size;
+        if( off == 0 ){
+            chunksToDownload.push_back(getChunkNumber(m_file->getFileSize()-1, block_download_size));
+        }
         if( off2 >= FileIO::block_read_ahead_start && off2 <= FileIO::block_read_ahead_end){
-            if( (chunkNumber == 0) && FileIO::download_last_chunk_at_the_beginning){
-                chunksToDownload.push_back(getChunkNumber(m_file->getFileSize()-1, write_buffer_size));
-            }
             uint64_t start = chunkStart;
-            start += spillOver ? 2*write_buffer_size : write_buffer_size;
+            start += spillOver ? 2*block_download_size : block_download_size;
             uint64_t temp = 0;
             for(uint64_t i = 0; i < FileIO::number_of_blocks_to_read_ahead; i++){
-                temp = start + i*write_buffer_size;
+                temp = start + i*block_download_size;
                 if (temp >= fileSize){
                     break;
                 }
-                chunksToDownload.push_back(temp/write_buffer_size);
+                chunksToDownload.push_back(temp/block_download_size);
             }
 
         }
 
         if(!chunksToDownload.empty()){
             m_file->m_event.wait();
-//            m_file->create_heap_handles(write_buffer_size);
+//            m_file->create_heap_handles(block_download_size);
             for (auto _chunkNumber: chunksToDownload) {
-                auto start = _chunkNumber*write_buffer_size;
+                auto start = _chunkNumber*block_download_size;
                 ss.str(std::string());
                 ss << m_file->getId();
                 ss << "-";
@@ -258,8 +258,8 @@ namespace DriveFS{
                     cache->last_access = time(NULL);
                     cache->name = cacheName2;
 
-                    auto chunkSize = (_chunkNumber +1)*write_buffer_size >= m_file->getFileSize() ?
-                                     m_file->getFileSize() - _chunkNumber*write_buffer_size : write_buffer_size;
+                    auto chunkSize = (_chunkNumber +1)*block_download_size >= m_file->getFileSize() ?
+                                     m_file->getFileSize() - _chunkNumber*block_download_size : block_download_size;
                     cache->size = chunkSize;
                     Object::cache.insert(m_file, _chunkNumber, chunkSize, cache);
 //                    void FileIO::download(DownloadItem cache, std::string cacheName2, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
