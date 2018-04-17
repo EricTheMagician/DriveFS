@@ -60,20 +60,7 @@ namespace DriveFS{
         SFAsync([=] {
             auto object = getObjectFromInodeAndReq(req, ino);
             if (object) {
-                uint64_t current = object->lookupCount.fetch_sub(nlookup, std::memory_order_acquire) - nlookup;
-                if (current == 0) {
-                    ino_t self = object->attribute.st_ino;
-                    for (const GDriveObject &parent: object->parents) {
-                        auto children = &(parent->children);
-                        auto it = std::find(children->begin(), children->end(), object);
-                        if (it != children->end()) {
-                            parent->children.erase(it);
-                        }
-                    }
-                    _Object::inodeToObject.erase(self);
-                    _Object::idToObject.erase(object->getId());
-                }
-
+                object->forget(object, nlookup);
             }
 
             fuse_reply_none(req);
@@ -663,7 +650,9 @@ namespace DriveFS{
 
     void ioctl(fuse_req_t req, fuse_ino_t ino, int cmd, void *arg, struct fuse_file_info *fi, unsigned flags, const void *in_buf, size_t in_bufsz, size_t out_bufsz);
 
-    void poll(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, struct fuse_pollhandle *ph);
+    void poll(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, struct fuse_pollhandle *ph){
+        fuse_reply_err(req, ENOSYS);
+    }
 
     void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi){
 
@@ -673,7 +662,17 @@ namespace DriveFS{
 
     void retrieve_reply(fuse_req_t req, void *cookie, fuse_ino_t ino, off_t offset, struct fuse_bufvec *bufv);
 
-    void forget_multi(fuse_req_t req, size_t count, struct fuse_forget_data *forgets);
+    void forget_multi(fuse_req_t req, size_t count, struct fuse_forget_data *forgets){
+
+        for(int i = 0; i < count; i++){
+            uint64_t ino = forgets[i].ino;
+            auto object = getObjectFromInodeAndReq(req, ino);
+            if(object)
+                object->forget(object, forgets[i].nlookup);
+        }
+
+        fuse_reply_none(req);
+    }
 
     void flock(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, int op);
 
@@ -692,6 +691,7 @@ namespace DriveFS{
         ops.lookup = lookup;
         ops.getattr = getattr;
         ops.forget = forget;
+        ops.forget_multi = forget_multi;
         ops.opendir = opendir;
 //        ops.readdirplus = readdirplus;
         ops.readdir = readdir;
@@ -712,6 +712,7 @@ namespace DriveFS{
         ops.setattr = setattr;
         ops.rename = rename;
         ops.init = init;
+        ops.poll = poll;
         return ops;
     }
 
