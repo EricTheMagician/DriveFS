@@ -62,6 +62,11 @@ namespace DriveFS {
             m_name = name;
         }
 
+        /*
+         * member function called for decreasing lookup counts
+         */
+        void forget(uint64_t nLookup);
+
 
     public:
         std::vector<GDriveObject> parents, children;

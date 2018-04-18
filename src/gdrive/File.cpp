@@ -494,19 +494,12 @@ namespace DriveFS{
         return getRFC3339StringFromTime(attribute.st_ctim);
     }
 
-    void _Object::forget(GDriveObject selfObject, uint64_t nLookup){
+    void _Object::forget(uint64_t nLookup){
         uint64_t current = lookupCount.fetch_sub(nLookup, std::memory_order_acquire) - nLookup;
-        if (current == 0) {
+        if ( (current == 0) && (parents.size() == 0))  {
             ino_t self = attribute.st_ino;
-            for (const GDriveObject &parent: parents) {
-                auto children = &(parent->children);
-                auto it = std::find(children->begin(), children->end(), selfObject);
-                if (it != children->end()) {
-                    parent->children.erase(it);
-                }
-            }
             _Object::inodeToObject.erase(self);
-            _Object::idToObject.erase(selfObject->getId());
+            _Object::idToObject.erase(getId());
         }
 
     }
