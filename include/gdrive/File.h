@@ -49,7 +49,6 @@ namespace DriveFS {
             addRelationship(std::move(child), children);
         };
 
-        void createVectorsForBuffers();
         void updatLastAccessToCache(uint64_t chunkNumber);
         inline bool getIsUploaded() const{return isUploaded;}
         void trash();
@@ -70,7 +69,7 @@ namespace DriveFS {
 
     public:
         std::vector<GDriveObject> parents, children;
-
+        void setNewId(const std::string &newId);
     protected:
         _Object(); // used for creating a default object when creating root folders
         void updateProperties(bsoncxx::document::view document);

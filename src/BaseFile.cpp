@@ -8,11 +8,11 @@ gid_t File::executing_gid;
 
 void File::create_heap_handles(size_t write_buffer_size){
     auto count = getFileSize() / write_buffer_size + 1;
+    m_handle_creation_event.wait();
     if(this->m_buffers == nullptr){
         this->m_buffers = new std::vector<WeakBuffer>(count);
-
     }else {
-        if(count * write_buffer_size < getFileSize()){
+        if(count > this->m_buffers->size()){
             this->m_buffers->resize(count);
         }
     }
@@ -20,8 +20,9 @@ void File::create_heap_handles(size_t write_buffer_size){
     if(this->heap_handles == nullptr){
         this->heap_handles = new std::vector<heap_handle>(count);
     }else {
-        if(count * write_buffer_size < getFileSize()){
+        if(count > this->heap_handles->size()){
             this->heap_handles->resize(count);
         }
     }
+    m_handle_creation_event.signal();
 }

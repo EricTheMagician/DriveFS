@@ -10,6 +10,7 @@
 #include <gdrive/FileIO.h>
 #include <regex>
 #include <boost/asio/thread_pool.hpp>
+#include <gdrive/File.h>
 
 //using namespace utility;
 //using namespace web;
@@ -445,7 +446,7 @@ namespace DriveFS {
                     if (ele) {
                         std::string url = ele.get_utf8().value.to_string();
                         SFAsync([io, url] {
-                            io->resumeFileUploadFromUrl(url);
+                            while(!io->resumeFileUploadFromUrl(url)){};
                             delete io;
                         });
                     } else {
@@ -468,47 +469,41 @@ namespace DriveFS {
             DriveFS::_Object::inodeToObject[inode] = object;
 
 
-//                if(object->isUploaded()) {
-//                        idToObject[id] = object;
-//                        inodeToObject[inode] = object;
-//                        this->doesFileExistOnAmazon(object);
+//            if(!object->getIsUploaded()) {
+//                namespace fs = boost::filesystem;
+//                fs::path base{FileIO::cachePath};
+//                base /= "upload";
+//                base /= object->getId() ;
+//                fs::path cache{base};
+//                cache += ".released";
+//
+//                if( !fs::exists(cache) ) {
+//
+//                    needs_updating = true;
+//                    mongocxx::model::delete_one delete_op(
+//                        document{} << "id" << object->getId() << finalize
+//                    );
+//                    documents.append(delete_op);
+//                    try {
+//                            fs::remove(base);
+//                    }catch(std::exception &e){
+//
+//                    }
+//                    LOG(TRACE) << "Cached item not found -- " << object->getId();
 //
 //                }else{
-//                        namespace fs = boost::filesystem;
-//                        fs::path base{CACHEPATH};
-//                        base /= object->m_id ;
-//                        fs::path cache{base};
-//                        cache += ".released";
+//                    LOG(TRACE) << "Found cached item -- " << object->getId();
+//                    SFAsync([object,base,cache,this] {
 //
-//                        if( !fs::exists(cache) ) {
+//                        FileIO io(object, 0, this);
+//                        io.b_is_uploading = true;
+//                        io.f_name = base.string();
+//                        io.upload();
+//                        fs::remove(cache);
+//                    });
 //
-//                                needs_updating = true;
-//                                mongocxx::model::delete_one delete_op(
-//                                    document{} << "id" << object->m_id << finalize
-//                                );
-//                                documents.append(delete_op);
-//                                try {
-//                                        fs::remove(base);
-//                                }catch(std::exception &e){
-//
-//                                }
-//                                LOG(TRACE) << "Cached item not found -- " << object->m_id;
-//
-//                        }else{
-//                                LOG(TRACE) << "Found cached item -- " << object->m_id;
-//                                SFAsync([object,base,cache,this] {
-//
-//                                    FileIO io(object, 0, this->api);
-//                                    io.b_is_uploading = true;
-//                                    io.f_name = base.string();
-//                                    io.upload(this);
-//                                    fs::remove(cache);
-//                                });
-//                                idToObject[id] = object;
-//                                inodeToObject[inode] = object;
-//
-//                        }
 //                }
+//            }
 
         }
 //            if(needs_updating) {
@@ -865,7 +860,7 @@ namespace DriveFS {
 
             bsoncxx::builder::stream::document doc;
             doc << "mimeType" << "application/vnd.google-apps.folder"
-                << "id" << getNextId()
+                << "id" << obj.getId()
                 << "name" << name
                 << "parents" << open_array << parent->getId() << close_array;
 
@@ -904,7 +899,9 @@ namespace DriveFS {
                 return true;
             }
         } else {
+            //TODO actually remove from parents
             child->removeParent(parent);
+
         }
         return false;
     }
@@ -957,7 +954,7 @@ namespace DriveFS {
         }
     }
 
-    std::string Account::getUploadUrlForFile(GDriveObject file, std::string mimeType) {
+    std::string Account::getUploadUrlForFile(GDriveObject file, std::string mimeType, int backoff) {
         refresh_token();
 
         http_client client("https://www.googleapis.com/upload/drive/v3", m_http_config);
@@ -996,29 +993,41 @@ namespace DriveFS {
 
         auto resp = client.request(req).get();
         std::string location;
-        if (resp.status_code() != 200) {
-            LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase();
-            LOG(ERROR) << resp.extract_utf8string(true).get();
-            LOG(INFO) << "Sleeping for 1 second before retrying";
-            sleep(1);
-            location = getUploadUrlForFile(req);
+
+        if(resp.status_code() == 404){
+            LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase() << "\n\t"
+                       << "for file with id " << file->getId();
+            file->setNewId(getNextId());
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " second before retrying";
+            sleep(sleep_time);
+            location = getUploadUrlForFile(file, mimeType, backoff + 1);
+        }else if (resp.status_code() != 200) {
+            LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase() << "\n\t"
+                       << resp.extract_utf8string(true).get();
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " second before retrying";
+            sleep(sleep_time);
+            location = getUploadUrlForFile(file, mimeType, backoff + 1);
         } else {
             location = resp.headers()["Location"];
         }
 
-        SFAsync([location, file, this] {
+        if(backoff == 0) {
+            SFAsync([location, file, this] {
 
-            mongocxx::pool::entry conn = pool.acquire();
-            mongocxx::database dbclient = conn->database(std::string(DATABASENAME));
-            mongocxx::collection db = dbclient[std::string(DATABASEDATA)];
-            file->m_event.wait();
-            db.update_one(document{} << "id" << file->getId() << finalize,
-                          document{} << "$set" << open_document <<
-                                     "uploadUrl" << location << close_document << finalize
-            );
-            file->m_event.signal();
+                mongocxx::pool::entry conn = pool.acquire();
+                mongocxx::database dbclient = conn->database(std::string(DATABASENAME));
+                mongocxx::collection db = dbclient[std::string(DATABASEDATA)];
+                file->m_event.wait();
+                db.update_one(document{} << "id" << file->getId() << finalize,
+                              document{} << "$set" << open_document <<
+                                         "uploadUrl" << location << close_document << finalize
+                );
+                file->m_event.signal();
 
-        });
+            });
+        }
 
         return location;
     }
@@ -1043,6 +1052,7 @@ namespace DriveFS {
 
     bool
     Account::upload(std::string uploadUrl, std::string filePath, size_t fileSize, int64_t start, std::string mimeType) {
+        refresh_token();
         try {
             concurrency::streams::istream stream = concurrency::streams::file_stream<unsigned char>::open_istream(
                     filePath).get();
@@ -1068,8 +1078,10 @@ namespace DriveFS {
                 return true;
             } else if (status_code == 401) {
                 refresh_token();
+            }else if(status_code == 40900){
+//                LOG(ERROR)
             } else {
-                LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase();
+                LOG(ERROR) << "Failed to upload, a file already exissts: " << resp.reason_phrase();
                 LOG(ERROR) << resp.extract_utf8string(true).get();
                 return false;
             }
@@ -1107,6 +1119,11 @@ namespace DriveFS {
                 return std::optional<int64_t>(0);
             }
         }
+        if(status_code == 400){
+            LOG(DEBUG) << url;
+            return std::optional<int64_t>(-400);
+        }
+
         if (status_code >= 400) {
             LOG(ERROR) << "Failed to get start point: " << response.reason_phrase();
             LOG(ERROR) << response.extract_utf8string(true).get();

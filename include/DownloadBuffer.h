@@ -23,14 +23,22 @@ public:
     std::vector<unsigned char>* buffer=nullptr;
     size_t size = 0;
     std::string name;
-    std::shared_future<void> future;
 
     int64_t last_access=0;
     bool isInvalid=false;
     AutoResetEvent event;
 
     __no_collision_download__(): buffer(nullptr){}
+    __no_collision_download__(__no_collision_download__ &&that){
+        this->buffer = that.buffer;
+        that.buffer = nullptr;
 
+        this->size = that.size;
+        this->name = that.name;
+        this->last_access = that.last_access;
+        this->isInvalid = that.isInvalid;
+
+    }
     ~__no_collision_download__(){
         if(buffer != nullptr){
             delete buffer;
@@ -73,7 +81,14 @@ public:
         sema.wait();
         auto handle = cache->push(item);
         file->create_heap_handles(m_block_download_size);
-        *(file->heap_handles->data()+chunkNumber) = handle;
+        LOG_IF(file->heap_handles->size() <= chunkNumber, ERROR) << "File heap handle size is " << file->heap_handles->size() << "\n"
+                                                                 << "Number of chunks based on size is " << file->getFileSize() / m_block_download_size+   1
+                                                                 << "\nNeeded block number "<< chunkNumber << "\n"
+                                                                 << "File is uploaded: " << (file->getIsUploaded() ? "true" : "false");
+
+        auto &heap_handles = *(file->heap_handles);
+        heap_handles[chunkNumber]= handle;
+
         auto newCacheSize = cacheSize.fetch_add(size, std::memory_order_release) + size;
         while(newCacheSize > maxCacheSize){
             auto &head = cache->top();
@@ -81,7 +96,6 @@ public:
             newCacheSize = cacheSize.fetch_sub(sz, std::memory_order_relaxed) - sz;
             VLOG(10) << "Deleting cache item "<< head->name <<" of size " << sz;
             cache->pop();
-
 
         }
         VLOG(10) << "Inserting " << std::to_string(chunkNumber);

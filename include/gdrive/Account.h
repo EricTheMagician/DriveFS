@@ -47,13 +47,19 @@ namespace DriveFS {
             return inode_count.fetch_add(1, std::memory_order_acquire)+1;
         }
 
+        inline void refresh_token(int backoff=0){
+            m_id_buffer.clear();
+            BaseAccount::refresh_token(backoff);
+        };
+
         GDriveObject createNewChild(GDriveObject parent, const char *name, int mode, bool isFile);
         bool removeChildFromParent(GDriveObject child, GDriveObject parent);
         void upsertFileToDatabase(GDriveObject file);
-        std::string getUploadUrlForFile(GDriveObject file, std::string mimeType = "application/octet-stream");
+        std::string getUploadUrlForFile(GDriveObject file, std::string mimeType = "application/octet-stream", int backoff=0);
         bool upload(std::string uploadUrl, std::string filePath, size_t fileSize, int64_t  start=0, std::string mimeType = "application/octet-stream");
         std::optional<int64_t> getResumableUploadPoint(std::string url, size_t fileSize, int backoff=0);
         bool updateObjectProperties(std::string id, std::string json, std::string addParents="", std::string removeParents="", int backoff=0);
+        std::string getNextId();
     protected:
         void run_internal() override;
         void loadFilesAndFolders() override;
@@ -62,7 +68,6 @@ namespace DriveFS {
         void parseFilesAndFolders(bsoncxx::document::view value, std::string teamDriveId, bool notify_fs=true);
         void getTeamDrives(int backoff=0);
         void linkParentsAndChildren();
-        std::string getNextId();
         std::string getUploadUrlForFile(http_request, int backoff=1);
         void generateIds(int_fast8_t backoff=0);
         std::string createFolderOnGDrive(const std::string json, int backoff=0);

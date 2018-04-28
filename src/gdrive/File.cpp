@@ -113,6 +113,7 @@ namespace DriveFS{
         }
         isUploaded = that.isUploaded;
     }
+
     _Object::_Object(DriveFS::_Object&& that): File(){
         lookupCount = that.lookupCount.load(std::memory_order_acquire);
         parents = std::move(that.parents);
@@ -389,24 +390,6 @@ namespace DriveFS{
     }
 
     _Object::~_Object(){
-        if(m_buffers != nullptr){
-            delete m_buffers;
-        }
-
-        if(heap_handles != nullptr){
-            delete heap_handles;
-        }
-    }
-
-    void _Object::createVectorsForBuffers(){
-        auto size = getFileSize();
-        if(m_buffers != nullptr){
-            delete m_buffers;
-        }
-        auto nChunks = size/FileIO::write_buffer_size + 1;
-        m_buffers = new std::vector<WeakBuffer>(nChunks);
-        heap_handles = new std::vector<heap_handle>(nChunks);
-
     }
 
     void _Object::updatLastAccessToCache(uint64_t chunkNumber){
@@ -502,6 +485,16 @@ namespace DriveFS{
             _Object::idToObject.erase(getId());
         }
 
+    }
+
+    void _Object::setNewId(const std::string &newId) {
+        m_event.wait();
+
+        const auto &shared = _Object::idToObject[m_id];
+        m_id = newId;
+        _Object::idToObject[m_id] = shared;
+
+        m_event.signal();
     }
 
 }

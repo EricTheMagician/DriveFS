@@ -79,7 +79,8 @@ namespace DriveFS {
 
     public:
 
-        std::vector<unsigned char> * getFromCache(const size_t &size, const off_t &off);
+        std::vector<unsigned char> * getFromCloud(const size_t &size, const off_t &off);
+        DownloadItem getFromCache(fs::path path, uint64_t chunkStart);
         void upload();
 
         std::string f_name; //f_name for the upload, d_name is the base download name

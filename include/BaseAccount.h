@@ -41,6 +41,7 @@ public:
     void run();
     inline bool needToInitialize() const {return m_needToInitialize;}
     inline http_client getClient(){
+        refresh_token();
         return http_client(m_apiEndpoint, m_http_config);
     }
 

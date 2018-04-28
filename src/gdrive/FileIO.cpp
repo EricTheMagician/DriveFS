@@ -24,7 +24,7 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
 }
 static boost::asio::thread_pool DownloadPool;
 namespace DriveFS{
-    uint_fast32_t FileIO::write_buffer_size = 4*1024*1024, //4mb
+    uint_fast32_t FileIO::write_buffer_size = 64*1024*1024, //64mb
             FileIO::block_read_ahead_start = UINT32_MAX,
             FileIO::block_read_ahead_end = UINT32_MAX,
             FileIO::block_download_size=1024*1024*2;
@@ -58,27 +58,39 @@ namespace DriveFS{
         if(write_buffer2 != nullptr){
             delete write_buffer2;
         }
+
+        if(stream.is_open()){
+            stream.flush();
+            stream.close();
+        }
     }
 
     std::vector<unsigned char>* FileIO::read(const size_t &size, const off_t &off) {
-        if(b_is_cached && stream && stream.is_open()){
+        if( (! m_file->getIsUploaded()) || (b_is_cached && stream && stream.is_open()) ){
+            if(!stream.is_open()){
+                stream.open(f_name.c_str());
+            }
             auto buf = new std::vector<unsigned char>(size);
             stream.seekg(off);
             stream.read( (char *) buf->data(), size);
             return buf;
         }
         try {
-            return getFromCache(size, off);
+            return getFromCloud(size, off);
         }catch(std::exception &e){
             LOG(ERROR) << e.what();
             m_file->m_event.signal();
-            return getFromCache(size, off);
+            return getFromCloud(size, off);
         }
 
     }
 
     void FileIO::download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
-        LOG(INFO) << "Downloading " << m_file->getName() <<"\t" << start;
+        if(!m_file){
+            LOG(ERROR) << "While downloading a file, this->m_file was null for " << cacheName << " ("<<start <<", " << end << ")";
+            return;
+        }
+        VLOG(10) << "Downloading " << m_file->getName() <<"\t" << start;
         http_client client = m_account->getClient();
         uri_builder builder( std::string("files/") +  m_file->getId());
         builder.append_query("alt", "media");
@@ -115,7 +127,7 @@ namespace DriveFS{
         cache->event.signal();
 
         //write buffer to disk
-        fs::path path = cachePath / cacheName;
+        fs::path path = cachePath / "download" / cacheName;
         FILE *fp = fopen(path.string().c_str(), "wb");
         if(fp != nullptr){
             fwrite(cache->buffer->data(), sizeof(unsigned char), cache->buffer->size(), fp);
@@ -136,7 +148,47 @@ namespace DriveFS{
         }
     }
 
-    std::vector<unsigned char> * FileIO::getFromCache( const size_t &_size, const off_t &off ){
+    /*
+     * \param spillover:bool is it from the spillover or the original
+     */
+    DownloadItem FileIO::getFromCache(fs::path path, uint64_t chunkStart){
+
+        if( ! fs::is_regular_file(path)) {
+            return nullptr;
+        }
+
+        auto filesize = fs::file_size(path);
+//        const uint64_t size2 = spillOver ? block_download_size - start /* how much it's been already read */: size;
+        __no_collision_download__ __item__;
+        __item__.name = m_file->getId();
+        __item__.name += "-";
+        __item__.name += chunkStart;
+        __item__.isInvalid = false;
+        __item__.size = filesize;
+
+
+//        assert((start + size2) <= filesize);
+        // read data from disk into memory
+        FILE *fp = fopen(path.string().c_str(), "rb");
+        if (fp == nullptr) {
+            //failed opening file
+            return nullptr;
+        }
+        __item__.buffer = new std::vector<unsigned char>(filesize, 0);
+        __item__.last_access = time(nullptr);
+        fread((void *)( __item__.buffer->data()), sizeof(unsigned char), filesize, fp);
+        fclose(fp);
+
+        // copy data
+
+        DownloadItem shared = std::make_shared<__no_collision_download__>(std::move(__item__));
+        Object::cache.insert(m_file, getChunkNumber(chunkStart, block_download_size), filesize, shared);
+        return shared;
+
+
+    }
+
+    std::vector<unsigned char> * FileIO::getFromCloud(const size_t &_size, const off_t &off){
 
         const uint64_t chunkNumber = getChunkNumber(off, block_download_size);
         const uint64_t chunkStart = getChunkStart(off, block_download_size);
@@ -158,6 +210,12 @@ namespace DriveFS{
 //        LOG(INFO) << "Calling signal " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.signal();
         auto buffer = new std::vector<unsigned char>(size, 0);
+        auto path_to_buffer = FileIO::cachePath;
+        path_to_buffer /= "download";
+        path_to_buffer /= m_file->getId();
+        path_to_buffer += "-";
+        path_to_buffer += std::to_string(chunkStart);
+
         if ( (item = m_file->m_buffers->at(chunkNumber).lock()) ) {
 
             if(item->buffer==nullptr || item->buffer->empty()){
@@ -168,7 +226,7 @@ namespace DriveFS{
             if(item->isInvalid){
                 LOG(TRACE) << "cache was invalid for " << m_file->getName();
                 chunksToDownload.push_back(chunkNumber);
-            }else {
+            } else {
                 const uint64_t start = off % block_download_size;
                 const uint64_t size2 = spillOver ? item->buffer->size() - start: size;
                 spillOverPrecopy = size2;
@@ -179,14 +237,31 @@ namespace DriveFS{
 
 
         }else{
-            chunksToDownload.push_back(chunkNumber);
+            item = getFromCache(path_to_buffer, chunkStart);
+            if( item) {
 
+                const uint64_t start = off % block_download_size;
+                const uint64_t size2 = spillOver ? item->buffer->size() - start: size;
+                spillOverPrecopy = size2;
+                assert((start+size2) <= item->buffer->size());
+                memcpy(buffer->data(), item->buffer->data()+start, size2);
+
+
+            }else{
+                chunksToDownload.push_back(chunkNumber);
+            }
         }
 
         if(spillOver) {
 
             const uint64_t chunkStart2 = chunkStart + block_download_size;
             const uint64_t chunkNumber2 = chunkNumber+1;
+
+            path_to_buffer = FileIO::cachePath;
+            path_to_buffer /= "download";
+            path_to_buffer /= m_file->getId();
+            path_to_buffer += "-";
+            path_to_buffer += std::to_string(chunkStart2);
 
             ss.str(std::string());
             ss <<m_file->getId();
@@ -217,7 +292,14 @@ namespace DriveFS{
                 }
 
             } else {
-                chunksToDownload.push_back(chunkNumber2);
+                item = getFromCache(path_to_buffer, chunkStart2);
+                if( item) {
+                    uint64_t size2 = (off + size) % block_download_size;
+                    assert((spillOverPrecopy + size2) <= buffer->size());
+                    memcpy(buffer->data() + spillOverPrecopy, item->buffer->data(), size2);
+                }else{
+                    chunksToDownload.push_back(chunkNumber2);
+                }
             }
 
         }
@@ -237,7 +319,14 @@ namespace DriveFS{
                 if (temp >= fileSize){
                     break;
                 }
-                chunksToDownload.push_back(temp/block_download_size);
+                auto path_to_buffer2 = FileIO::cachePath;
+                path_to_buffer2 /= "download";
+                path_to_buffer2 /= m_file->getId();
+                path_to_buffer2 += "-";
+                path_to_buffer2 += std::to_string(start);
+                if(!fs::exists(path_to_buffer2)) {
+                    chunksToDownload.push_back(temp / block_download_size);
+                }
             }
 
         }
@@ -268,7 +357,7 @@ namespace DriveFS{
                     fs::path path(cachePath);
                     path /= std::string(cacheName2);
                     if(fs::exists(path)){
-                        FILE *fp = fopen(path.string().c_str(), "r");
+                        FILE *fp = fopen(path.string().c_str(), "rb");
                         if(fp != nullptr){
 
                             auto fsize = fs::file_size(path);
@@ -298,13 +387,13 @@ namespace DriveFS{
             return buffer;
         }else{
             delete buffer;
-            return getFromCache( size, off);
+            return getFromCloud(size, off);
         }
 
     }
 
     void FileIO::setFileName(){
-        fs::path file_location(CACHEPATH);
+        fs::path file_location(FileIO::cachePath);
         file_location /= std::string("upload");
         file_location /= m_file->getId();
         f_name = file_location.string();
@@ -327,7 +416,11 @@ namespace DriveFS{
                 return;
             }
 
-            stream.open(f_name.c_str());
+            fs::path path = f_name;
+            path += ".released";
+            if(fs::exists(path)) {
+                stream.open(path.c_str());
+            }
         }
 
         return;
@@ -350,7 +443,20 @@ namespace DriveFS{
         // make sure that the file is no longer setting attribute
         m_file->m_event.wait();
         m_file->m_event.signal();
+        LOG(INFO) << "About to upload file \""<< m_file->getName() << "\"";
         bool status = m_account->upload(uploadUrl, f_name + ".released", m_file->getFileSize());
+        if(status){
+            LOG(INFO) << "Successfully uploaded file \""<< m_file->getName() << "\"";
+            if( fs::remove(f_name + ".released") ){
+                LOG(TRACE) << "Removed cache file \""<< m_file->getName() << "\"";
+            }else{
+                LOG(ERROR) << "There was an error removing file \""<< m_file->getName() << "\" from cache";
+            }
+        }else{
+            while(!resumeFileUploadFromUrl(uploadUrl)){
+                LOG(INFO) << "Retrying to upload file \"" << m_file->getName() << "\"";
+            };
+        }
     }
 
     void FileIO::release(){
@@ -399,12 +505,32 @@ namespace DriveFS{
     bool FileIO::resumeFileUploadFromUrl(std::string url){
         auto start = m_account->getResumableUploadPoint(url, m_file->getFileSize());
         LOG(INFO) << "Resuming upload of: " << m_file->getName();
-        if(start){
-            LOG(INFO) << "Starting from: " << start.value() << " / " << m_file->getFileSize() << "  " << (int) ((double) start.value() / (double) m_file->getFileSize() * 100.0) << "%";
-            m_account->upload(url, f_name + ".released", m_file->getFileSize(), start.value());
+        if(start && start.value() >= 0){
+            LOG(INFO) << "Starting from: " << start.value() / 1024 / 1024  << "MB / " << m_file->getFileSize()/1024/1024 << "MB  " << (int) ((double) start.value() / (double) m_file->getFileSize() * 100.0) << "%";
+            return m_account->upload(url, f_name + ".released", m_file->getFileSize(), start.value());
         }else{
+            if(m_file->getIsUploaded()) {
+                fs::path path = f_name;
+                path += ".released";
+                fs::remove(path);
+                return true;
+            }
+
+            if(start && start.value()){
+                auto value = start.value();
+                if(value < 0){
+                    value = -value;
+
+                    if(value == 400){
+                        m_file->setNewId(m_account->getNextId());
+                    }
+
+                }
+            }
+
             LOG(INFO) << "Starting from: 0";
             upload();
+            return true;
         }
     }
 }
