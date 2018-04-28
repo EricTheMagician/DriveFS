@@ -101,5 +101,6 @@ target_link_libraries(${PROJECT_NAME}
 target_compile_definitions(${PROJECT_NAME}
       PUBLIC
         ELPP_THREAD_SAFE
+        ELPP_FEATURE_CRASH_LOG
         )
 
