@@ -57,14 +57,12 @@ namespace DriveFS{
     }
 
     void forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup){
-        SFAsync([=] {
-            auto object = getObjectFromInodeAndReq(req, ino);
-            if (object) {
-                object->forget(object, nlookup);
-            }
+        auto object = getObjectFromInodeAndReq(req, ino);
+        if (object) {
+            object->forget(nlookup);
+        }
 
-            fuse_reply_none(req);
-        });
+        fuse_reply_none(req);
     }
 
     void getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
@@ -136,64 +134,62 @@ namespace DriveFS{
     void mknod(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev_t rdev);
 
     void mkdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name, mode_t mode){
-        SFAsync([=] {
-            auto parent = getObjectFromInodeAndReq(req, parent_ino);
-            GDriveObject child = parent->findChildByName(name);
-            if (child) {
-                fuse_reply_err(req, EEXIST);
-                return;
-            }
+        auto parent = getObjectFromInodeAndReq(req, parent_ino);
+        GDriveObject child = parent->findChildByName(name);
+        if (child) {
+            LOG(INFO) << "Mkdir with name " << name << " already existed";
+            fuse_reply_err(req, EEXIST);
+            return;
+        }
 
-            auto account = getAccount(req);
-            auto folder = account->createNewChild(parent, name, mode, false);
-            struct fuse_entry_param e;
-            memset(&e, 0, sizeof(e));
-            e.attr = folder->attribute;
-            e.ino = e.attr.st_ino;
-            e.attr_timeout = 18000.0;
-            e.entry_timeout = 18000.0;
-            folder->lookupCount.fetch_add(1, std::memory_order_relaxed);
-            fuse_reply_entry(req, &e);
-        });
+        auto account = getAccount(req);
+        auto folder = account->createNewChild(parent, name, mode, false);
+        struct fuse_entry_param e;
+        memset(&e, 0, sizeof(e));
+        e.attr = folder->attribute;
+        e.ino = e.attr.st_ino;
+        e.attr_timeout = 18000.0;
+        e.entry_timeout = 18000.0;
+        folder->lookupCount.fetch_add(1, std::memory_order_relaxed);
+        LOG(INFO) << "Mkdir with name " << name;
+        fuse_reply_entry(req, &e);
     }
 
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
-        SFAsync([=] {
-            auto account = getAccount(req);
-            GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
-            parent->m_event.wait();
-            bool signaled = false;
-            auto children = &(parent->children);
-            for (uint_fast32_t i = 0; i < children->size(); i++) {
-                auto child = (*children)[i];
-                if (child->getName().compare(name) == 0) {
-                    children->erase(children->begin() + i);
-                    parent->m_event.signal();
-                    signaled = true;
-                    child->m_event.wait();
-
-                    if (child->getIsUploaded()) {
-                        account->removeChildFromParent(child, parent);
-                    }
-
-                    child->trash();
-                    child->m_event.signal();
-                    break;
-                }
-            }
-
-            if (!signaled) {
+        auto account = getAccount(req);
+        GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
+        parent->m_event.wait();
+        bool signaled = false;
+        auto children = &(parent->children);
+        for (uint_fast32_t i = 0; i < children->size(); i++) {
+            auto child = (*children)[i];
+            if (child->getName().compare(name) == 0) {
+                children->erase(children->begin() + i);
                 parent->m_event.signal();
-                fuse_reply_err(req, ENOENT);
-            } else {
-                fuse_reply_err(req, 0);
+                signaled = true;
+                child->m_event.wait();
+
+                if (child->getIsUploaded()) {
+                    account->removeChildFromParent(child, parent);
+                }
+
+                child->trash();
+                child->m_event.signal();
+                break;
             }
-        });
+        }
+
+        if (!signaled) {
+            parent->m_event.signal();
+            fuse_reply_err(req, ENOENT);
+        } else {
+            fuse_reply_err(req, 0);
+        }
 
     }
 
     void rmdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
-        SFAsync([=] {
+//        SFAsync([=] {
             auto parent = getObjectFromInodeAndReq(req, parent_ino);
             GDriveObject child = parent->findChildByName(name);
             if (child) {
@@ -216,7 +212,7 @@ namespace DriveFS{
             } else {
                 fuse_reply_err(req, ENOENT);
             }
-        });
+//        });
     }
 
     void symlink(fuse_req_t req, const char *link, fuse_ino_t parent, const char *name);
@@ -310,7 +306,6 @@ namespace DriveFS{
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
-//        SFAsync([=]{buf->si
             FileIO * io = (FileIO *) fi->fh;
             if(io == nullptr){
                 LOG(ERROR) << "io was null when reading file";
@@ -323,16 +318,16 @@ namespace DriveFS{
             size = io->m_file->getFileSize() - off;
             VLOG(10) << "adjusting size to " << size << " and file size "<< io->m_file->getFileSize();
         }
-            auto buf = io->read(size, off);
-            auto outsize = buf->size();
+
+        auto buf = io->read(size, off);
+        auto outsize = buf->size();
 
         if(outsize != size){
             LOG(TRACE) << "buffer size was not the same as expected: " << outsize << " vs " << size;
         }
 
-            fuse_reply_buf(req, (const char *) buf->data(), outsize);
-            delete buf;
-//        });
+        fuse_reply_buf(req, (const char *) buf->data(), outsize);
+        delete buf;
     }
 
     void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi){
@@ -458,14 +453,20 @@ namespace DriveFS{
 
             if(io->b_needs_uploading){
                 //sleep for 3 seconds to make sure that the filesystem has not decided to delete the file.
-                sleep(3);
-                auto file = getObjectFromInodeAndReq(req, ino);
-                if(file) {
-                    io->upload();
-                }
+                fi->fh = 0;
+                SFAsync([req, ino, io]() {
+                    sleep(3);
+                    auto file = getObjectFromInodeAndReq(req, ino);
+                    if (file) {
+                        io->upload();
+                    }
+                    delete io;
+                });
+            }else{
+                delete io;
+                fi->fh = 0;
             }
 
-            delete io;
 //        });
     }
 
@@ -521,7 +522,9 @@ namespace DriveFS{
         fuse_reply_statfs(req, &stat);
     }
 
-    void setxattr(fuse_req_t req, fuse_ino_t ino, const char *name, const char *value, size_t size, int flags);
+    void setxattr(fuse_req_t req, fuse_ino_t ino, const char *name, const char *value, size_t size, int flags){
+        fuse_reply_err(req, ENOENT);
+    }
 
     void getxattr(fuse_req_t req, fuse_ino_t ino, const char *name, size_t size){
         auto object = getObjectFromInodeAndReq(req, ino);
@@ -595,7 +598,9 @@ namespace DriveFS{
         fuse_reply_err(req, ENOENT);
     }
 
-    void removexattr(fuse_req_t req, fuse_ino_t ino, const char *name);
+    void removexattr(fuse_req_t req, fuse_ino_t ino, const char *name){
+        fuse_reply_err(req, ENOSYS);
+    }
 
     void access(fuse_req_t req, fuse_ino_t ino, int mask){
         fuse_reply_err(req, 0);
@@ -655,9 +660,7 @@ namespace DriveFS{
     }
 
     void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi){
-
-
-
+        fuse_reply_err(req, ENOSYS);
     }
 
     void retrieve_reply(fuse_req_t req, void *cookie, fuse_ino_t ino, off_t offset, struct fuse_bufvec *bufv);
@@ -667,8 +670,10 @@ namespace DriveFS{
         for(int i = 0; i < count; i++){
             uint64_t ino = forgets[i].ino;
             auto object = getObjectFromInodeAndReq(req, ino);
-            if(object)
-                object->forget(object, forgets[i].nlookup);
+            if(object) {
+
+                object->forget(forgets[i].nlookup);
+            }
         }
 
         fuse_reply_none(req);
@@ -688,6 +693,7 @@ namespace DriveFS{
 
     fuse_lowlevel_ops getOps(){
         fuse_lowlevel_ops ops;
+        memset(&ops, 0,sizeof(ops));
         ops.lookup = lookup;
         ops.getattr = getattr;
         ops.forget = forget;
@@ -713,6 +719,9 @@ namespace DriveFS{
         ops.rename = rename;
         ops.init = init;
         ops.poll = poll;
+//        ops.write_buf = write_buf;
+        ops.setxattr = setxattr;
+        ops.removexattr = removexattr;
         return ops;
     }
 
