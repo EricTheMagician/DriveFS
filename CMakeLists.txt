@@ -83,7 +83,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 
 SET(Boost_USE_MULTITHREAD ON)
 find_package(PkgConfig REQUIRED)
-find_package(Boost COMPONENTS thread system program_options filesystem REQUIRED)
+find_package(Boost 1.66.0 COMPONENTS thread system program_options filesystem REQUIRED)
 find_library(LIBCRYPTO libcrypto.so.1.0.0)
 find_library(LIBSSL libssl.so.1.0.0)
 
