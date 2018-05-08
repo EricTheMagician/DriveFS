@@ -117,7 +117,7 @@ namespace DriveFS{
             const unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
-            if (backoff <= 5) {
+            if (backoff <= 10) {
                 download(cache, std::move(cacheName), start, end, backoff + 1);
             }
             return;
@@ -372,10 +372,13 @@ namespace DriveFS{
 
 
                     boost::asio::defer(DownloadPool,
-                                      [this, cache, start, chunkSize]()->void
-                                      {
-                                          this->download( cache, cache->name, start, start + chunkSize - 1, 0);
-                                      });
+                      [this, start, chunkSize, weak_obj = std::weak_ptr(cache)]()->void
+                      {
+                          auto strong_obj = weak_obj.lock();
+                          if(strong_obj) {
+                              this->download(strong_obj, strong_obj->name, start, start + chunkSize - 1, 0);
+                          }
+                      });
                 }
             }
             m_file->m_event.signal();
