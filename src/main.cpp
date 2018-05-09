@@ -25,6 +25,7 @@ int main(int argc, char **argv) {
             ("cache-disk-size", po::value<size_t>(), "maximum size of the cache on disk. only for downloads. currently not used.")
             ("download-chunks", po::value<uint_fast8_t>()->default_value(4), "maximum number of chunks to download ahead")
             ("download-last-chunk", po::value<bool>()->default_value(true), "download the last chunk of a file when downloading the first chunk")
+            ("move-to-download", po::value<bool>()->default_value(true), "move a uploaded file to the download cache")
             ;
 
     fuse_desc.add_options()
@@ -123,7 +124,7 @@ int main(int argc, char **argv) {
     DriveFS::FileIO::number_of_blocks_to_read_ahead = vm["download-chunks"].as<uint_fast8_t>();
     DriveFS::FileIO::block_download_size = vm["cache-chunk-size"].as<size_t>();
     DriveFS::FileIO::block_read_ahead_end = std::min(DriveFS::FileIO::block_download_size + 128 * 1024, DriveFS::FileIO::block_download_size-1) ;
-
+    DriveFS::FileIO::move_files_to_download_on_finish_upload = vm["move-to-download"].as<bool>();
     if( fs::exists(DriveFS::FileIO::cachePath) ){
         if(fs::is_regular_file(DriveFS::FileIO::cachePath)){
             LOG(ERROR) << DriveFS::FileIO::cachePath << " is a file";

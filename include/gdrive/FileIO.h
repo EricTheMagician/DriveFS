@@ -43,9 +43,9 @@ namespace DriveFS {
                 block_download_size, // size of the download chunk
                 block_read_ahead_start, block_read_ahead_end; // boundaries to download extra blocks ahead of time
         static uint_fast8_t number_of_blocks_to_read_ahead; // number of blocks to download ahead of time
-
         static fs::path cachePath;
         static bool download_last_chunk_at_the_beginning; // if true, download the last chunk when downloading the first chunk. useful for media players.
+        static bool move_files_to_download_on_finish_upload;
         FileIO(GDriveObject object, int flag, Account *account);
 
         ~FileIO();

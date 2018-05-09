@@ -30,6 +30,7 @@ namespace DriveFS{
             FileIO::block_download_size=1024*1024*2;
     uint_fast8_t FileIO::number_of_blocks_to_read_ahead = 0;
     bool FileIO::download_last_chunk_at_the_beginning = false;
+    bool FileIO::move_files_to_download_on_finish_upload = true;
 
     fs::path FileIO::cachePath = "/tmp";
 
@@ -45,7 +46,8 @@ namespace DriveFS{
             write_buffer2(nullptr),
             first_write_to_buffer(0),
             last_write_to_buffer(0),
-            m_event(1)
+            m_event(1),
+            m_fp(nullptr)
     {
         setFileName();
         assert(m_readable || m_writeable || flag == 0);
@@ -59,20 +61,21 @@ namespace DriveFS{
             delete write_buffer2;
         }
 
-        if(stream.is_open()){
-            stream.flush();
-            stream.close();
+        if(m_fp != nullptr){
+            fclose(m_fp);
         }
     }
 
     std::vector<unsigned char>* FileIO::read(const size_t &size, const off_t &off) {
-        if( (! m_file->getIsUploaded()) || (b_is_cached && stream && stream.is_open()) ){
-            if(!stream.is_open()){
-                stream.open(f_name.c_str());
+        if( (! m_file->getIsUploaded()) || (b_is_cached && isOpen()) ){
+            if(!isOpen()){
+                open();
             }
             auto buf = new std::vector<unsigned char>(size);
-            stream.seekg(off);
-            stream.read( (char *) buf->data(), size);
+            m_event.wait();
+            fseek(m_fp, off, SEEK_SET);
+            fread( (char *) buf->data(), sizeof(char), size, m_fp);
+            m_event.signal();
             return buf;
         }
         try {
@@ -408,9 +411,8 @@ namespace DriveFS{
             clearFileFromCache();
             b_is_cached = true;
             m_file->attribute.st_size = 0;
-            stream.open(f_name, std::ios_base::out);
-            create_write_buffer();
-            create_write_buffer2();
+            m_fp = fopen(f_name.data(), "rwb");
+            m_fd = fileno(m_fp);
         }
         else if(m_readable) {
             if (m_file->getIsUploaded()) {
@@ -419,10 +421,11 @@ namespace DriveFS{
                 return;
             }
 
-            fs::path path = f_name;
+            fs::path path = f_name.data();
             path += ".released";
             if(fs::exists(path)) {
-                stream.open(path.c_str());
+                m_fp = fopen(path.c_str(), "rb");
+                m_fd = fileno(m_fp);
             }
         }
 
@@ -446,11 +449,50 @@ namespace DriveFS{
         // make sure that the file is no longer setting attribute
         m_file->m_event.wait();
         m_file->m_event.signal();
+        auto uploadPath = f_name + ".released";
         LOG(INFO) << "About to upload file \""<< m_file->getName() << "\"";
+//<<<<<<< Updated upstream
         bool status = m_account->upload(uploadUrl, f_name + ".released", m_file->getFileSize());
+        if(move_files_to_download_on_finish_upload){
+            auto sz = m_file->getFileSize();
+            auto start = 0;
+            auto *in_fd = fopen(uploadPath.c_str(), "rb");
+            char buffer[block_download_size];
+
+            auto read_size = block_download_size;
+
+            while( (start + read_size) <= sz){
+
+                fread(buffer, sizeof(char), read_size, in_fd);
+                fs::path out_path = cachePath;
+                out_path /= "download";
+                out_path /= m_file->getId() + "-" + std::to_string(start);
+                FILE* out_fd = fopen(out_path.c_str(),  "wb");
+                if(out_fd == nullptr) {
+                    LOG(ERROR) << "Unable to open file " << out_path.string() << strerror(errno);
+                }else{
+                    fwrite(buffer, sizeof(char), read_size, out_fd);
+                    fclose(out_fd);
+                }
+
+                start += read_size;
+                if ((start + read_size) > sz){
+                    read_size = sz - start;
+                }
+
+                if(read_size <= 0 ){
+                    break;
+                }
+
+            }
+
+            fclose(in_fd);
+
+            free(buffer);
+        }
         if(status){
             LOG(INFO) << "Successfully uploaded file \""<< m_file->getName() << "\"";
-            if( fs::remove(f_name + ".released") ){
+            if( fs::remove(uploadPath) ){
                 LOG(TRACE) << "Removed cache file \""<< m_file->getName() << "\"";
             }else{
                 LOG(ERROR) << "There was an error removing file \""<< m_file->getName() << "\" from cache";
@@ -464,10 +506,12 @@ namespace DriveFS{
 
     void FileIO::release(){
 
-        if(last_write_to_buffer >0 && stream && stream.is_open()){
-            stream.write((char *) write_buffer->data(),last_write_to_buffer);
+        if(last_write_to_buffer >0 && isOpen()){
+            fwrite((char *) write_buffer->data(), sizeof(char), last_write_to_buffer, m_fp);
             last_write_to_buffer = 0;
-            stream.close();
+            fclose(m_fp);
+            m_fp = nullptr;
+            m_fd = -1;
         }
 
         if(b_needs_uploading){
