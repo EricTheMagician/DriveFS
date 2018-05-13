@@ -115,8 +115,19 @@ namespace DriveFS{
         req.set_request_uri(builder.to_uri());
 
         VLOG(10) << req.headers()["Range"];
-        http_response  resp = client.request(req).get();
+
+        http_response resp;
+        try {
+            resp = client.request(req).get();
+        }catch(std::exception &e){
+            LOG(ERROR) << "There was an error while trying to download chunk";
+            LOG(DEBUG) << "File ID " << m_file->getId();
+            LOG(DEBUG) << "File Size " << m_file->getFileSize();
+            LOG(DEBUG) << "Url " << builder.to_string();
+            goto HTTP_ERROR;
+        };
         if(resp.status_code() != 206 && resp.status_code() != 200){
+HTTP_ERROR:
             LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
             LOG(ERROR) << resp.extract_json(true).get();
             const unsigned int sleep_time = std::pow(2, backoff);
@@ -129,6 +140,7 @@ namespace DriveFS{
         }
 
         cache->buffer = new std::vector<unsigned char>(resp.extract_vector().get());
+        std::atomic_thread_fence(std::memory_order_release);
         cache->event.signal();
 
         //write buffer to disk
@@ -153,6 +165,10 @@ namespace DriveFS{
         }
     }
 
+    bool FileIO::bufferMatchesExpectedBufferSize(const size_t &bufferSize){
+        return (bufferSize == block_download_size) || (bufferSize == m_file->getFileSize() % block_download_size);
+    }
+
     /*
      * \param spillover:bool is it from the spillover or the original
      */
@@ -163,7 +179,7 @@ namespace DriveFS{
         }
 
         auto filesize = fs::file_size(path);
-//        const uint64_t size2 = spillOver ? block_download_size - start /* how much it's been already read */: size;
+//        const uint64_t size2 = spillOver ? block_download_size - start /* how much it's been already read */: read_size;
         __no_collision_download__ __item__;
         __item__.name = m_file->getId();
         __item__.name += "-";
@@ -184,6 +200,9 @@ namespace DriveFS{
         auto read_size = fread((char *)( __item__.buffer->data()), sizeof(unsigned char), filesize, fp);
         fclose(fp);
 
+        if(!bufferMatchesExpectedBufferSize(read_size))
+            return nullptr;
+
         // copy data
 
         DownloadItem shared = std::make_shared<__no_collision_download__>(std::move(__item__));
@@ -200,11 +219,7 @@ namespace DriveFS{
         const auto fileSize = m_file->getFileSize();
         const size_t size = _size + off > fileSize ? fileSize-off-1: _size;
         const bool spillOver = chunkStart != getChunkStart(off+size, block_download_size);
-        std::stringstream ss;
-        ss << m_file->getId();
-        ss<< "\t";
-        ss << chunkStart;
-        std::string cacheName = ss.str();
+        std::string cacheName = m_file->getId() + "\t" + std::to_string(chunkStart);
         std::vector<uint64_t> chunksToDownload;
         uint64_t spillOverPrecopy=0;
 
@@ -228,13 +243,20 @@ namespace DriveFS{
                 item->event.signal();
             }
 
-            if(item->isInvalid){
+            if(item->isInvalid || (!bufferMatchesExpectedBufferSize(item->buffer->size())) ){
+                item->isInvalid = true;
                 LOG(TRACE) << "cache was invalid for " << m_file->getName();
                 chunksToDownload.push_back(chunkNumber);
             } else {
                 const uint64_t start = off % block_download_size;
                 const uint64_t size2 = spillOver ? item->buffer->size() - start: size;
                 spillOverPrecopy = size2;
+                LOG_IF((start+size2) > item->buffer->size(),
+                        ERROR)  << "About to fail assertion\n"
+                                << "ID: " << m_file->getId()
+                                << "\nfileSize: " << m_file->getFileSize()
+                                << "\nbufferSize: " << item->buffer->size()
+                                << "\n(off,size)  (" << off << ", " << size  << ")";
                 assert((start+size2) <= item->buffer->size());
                 memcpy(buffer->data(), item->buffer->data()+start, size2);
 //                m_file->cache.updateAccessTime(m_file, chunkNumber, item);
@@ -248,6 +270,13 @@ namespace DriveFS{
                 const uint64_t start = off % block_download_size;
                 const uint64_t size2 = spillOver ? item->buffer->size() - start: size;
                 spillOverPrecopy = size2;
+                LOG_IF((start+size2) > item->buffer->size(),
+                       ERROR)  << "About to fail assertion\n"
+                               << "ID: " << m_file->getId()
+                               << "\nfileSize: " << m_file->getFileSize()
+                               << "\nbufferSize: " << item->buffer->size()
+                               << "\n(off,size)  (" << off << ", " << size  << ")";
+
                 assert((start+size2) <= item->buffer->size());
                 memcpy(buffer->data(), item->buffer->data()+start, size2);
 
@@ -264,15 +293,9 @@ namespace DriveFS{
 
             path_to_buffer = FileIO::cachePath;
             path_to_buffer /= "download";
-            path_to_buffer /= m_file->getId();
-            path_to_buffer += "-";
-            path_to_buffer += std::to_string(chunkStart2);
+            path_to_buffer /= m_file->getId() + "-" + std::to_string(chunkStart2);
 
-            ss.str(std::string());
-            ss <<m_file->getId();
-            ss << "\t";
-            ss << chunkStart2;
-            cacheName = ss.str();
+            cacheName = m_file->getId() + "\t" + std::to_string(chunkStart2);
             DownloadItem item;
 
             if ( (item=m_file->m_buffers->at(chunkNumber2).lock()) ) {
@@ -282,7 +305,8 @@ namespace DriveFS{
                         item->event.signal();
                     }
 
-                    if(item->isInvalid){
+                    if(item->isInvalid || (!bufferMatchesExpectedBufferSize(item->buffer->size())) ){
+                        item->isInvalid = true;
                         LOG(TRACE) << "cache was invalid for " << m_file->getName();
                         chunksToDownload.push_back(chunkNumber2);
                     }else{
@@ -313,7 +337,10 @@ namespace DriveFS{
         bool done = chunksToDownload.empty();
         int off2 = off % block_download_size;
         if( off == 0 ){
-            chunksToDownload.push_back(getChunkNumber(m_file->getFileSize()-1, block_download_size));
+            auto sz = m_file->getFileSize();
+            if (sz > 0) {
+                chunksToDownload.push_back(getChunkNumber(sz-1, block_download_size));
+            }
         }
         if( off2 >= FileIO::block_read_ahead_start && off2 <= FileIO::block_read_ahead_end){
             uint64_t start = chunkStart;
@@ -326,9 +353,7 @@ namespace DriveFS{
                 }
                 auto path_to_buffer2 = FileIO::cachePath;
                 path_to_buffer2 /= "download";
-                path_to_buffer2 /= m_file->getId();
-                path_to_buffer2 += "-";
-                path_to_buffer2 += std::to_string(start);
+                path_to_buffer2 /= m_file->getId() + "-" + std::to_string(start);
                 if(!fs::exists(path_to_buffer2)) {
                     chunksToDownload.push_back(temp / block_download_size);
                 }
@@ -341,11 +366,7 @@ namespace DriveFS{
 //            m_file->create_heap_handles(block_download_size);
             for (auto _chunkNumber: chunksToDownload) {
                 auto start = _chunkNumber*block_download_size;
-                ss.str(std::string());
-                ss << m_file->getId();
-                ss << "-";
-                ss << start;
-                std::string cacheName2(ss.str());
+                std::string cacheName2 = m_file->getId() + "-" + std::to_string(start);
                 DownloadItem item = m_file->m_buffers->at(_chunkNumber).lock();
                 if ( !(item) || item->isInvalid){
                     DownloadItem cache = std::make_shared<__no_collision_download__>();
@@ -360,7 +381,8 @@ namespace DriveFS{
                     (*m_file->m_buffers)[_chunkNumber] = cache;
 
                     fs::path path(cachePath);
-                    path /= std::string(cacheName2);
+                    path /= "download";
+                    path /= cacheName2;
                     if(fs::exists(path)){
                         FILE *fp = fopen(path.string().c_str(), "rb");
                         if(fp != nullptr){
@@ -457,15 +479,15 @@ namespace DriveFS{
         m_file->m_event.signal();
         auto uploadPath = f_name + ".released";
         LOG(INFO) << "About to upload file \""<< m_file->getName() << "\"";
-//<<<<<<< Updated upstream
+
         bool status = m_account->upload(uploadUrl, f_name + ".released", m_file->getFileSize());
         if(move_files_to_download_on_finish_upload){
             auto sz = m_file->getFileSize();
             auto start = 0;
-            auto *in_fd = fopen(uploadPath.c_str(), "rb");
-            char buffer[block_download_size];
-
-            auto read_size = block_download_size;
+            FILE *in_fd = fopen(uploadPath.c_str(), "rb");
+//            char buffer[block_download_size];
+            char *buffer = (char *)malloc(sizeof(char) * block_download_size);
+            auto read_size = block_download_size > sz ? sz : block_download_size;
 
             while( (start + read_size) <= sz){
 
@@ -475,7 +497,7 @@ namespace DriveFS{
                 out_path /= m_file->getId() + "-" + std::to_string(start);
                 FILE* out_fd = fopen(out_path.c_str(),  "wb");
                 if(out_fd == nullptr) {
-                    LOG(ERROR) << "Unable to open file " << out_path.string() << strerror(errno);
+                    LOG(ERROR) << "Unable to open file " << out_path.string() << ": "<< strerror(errno);
                 }else{
                     fwrite(buffer, sizeof(char), read_size, out_fd);
                     fclose(out_fd);

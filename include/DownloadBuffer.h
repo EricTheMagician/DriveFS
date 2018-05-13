@@ -95,6 +95,7 @@ public:
             auto sz = head->buffer == nullptr ? head->size : head->buffer->size();
             newCacheSize = cacheSize.fetch_sub(sz, std::memory_order_relaxed) - sz;
             VLOG(10) << "Deleting cache item "<< head->name <<" of size " << sz;
+            LOG_IF(head.use_count() > 1, TRACE) << "Use count for " << head->name << " is " << head.use_count();
             cache->pop();
 
         }

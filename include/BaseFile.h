@@ -4,11 +4,11 @@
 
 #pragma once
 
-#include <sys/stat.h>
 #include <fuse_lowlevel.h>
 #include <autoresetevent.h>
 #include "DownloadBuffer.h"
 #include <unistd.h>
+#include <sys/stat.h>
 
 class File{
 

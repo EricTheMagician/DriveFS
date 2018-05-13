@@ -32,7 +32,7 @@ namespace DriveFS {
             "https://www.googleapis.com/oauth2/v4/token",
             "http://localhost:7878",
             GDRIVE_OAUTH_SCOPE),
-                         m_id_buffer(10) {
+                                                 m_id_buffer(10) {
 
         upsert.upsert(true);
         find_and_upsert.upsert(true);
@@ -1014,7 +1014,6 @@ namespace DriveFS {
         }
 
         if(backoff == 0) {
-            SFAsync([location, file, this] {
 
                 mongocxx::pool::entry conn = pool.acquire();
                 mongocxx::database dbclient = conn->database(std::string(DATABASENAME));
@@ -1026,7 +1025,6 @@ namespace DriveFS {
                 );
                 file->m_event.signal();
 
-            });
         }
 
         return location;

@@ -77,6 +77,8 @@ namespace DriveFS {
             return m_readable;
         }
 
+        bool bufferMatchesExpectedBufferSize(const size_t &bufferSize);
+
     public:
 
         std::vector<unsigned char> * getFromCloud(const size_t &size, const off_t &off);
@@ -93,7 +95,6 @@ namespace DriveFS {
 //        int m_flags;
         std::vector<unsigned char> *write_buffer, *write_buffer2;
         off_t last_write_to_buffer, first_write_to_buffer;
-        std::fstream stream;
         AutoResetEvent m_event;
         int m_fd=-1;
         FILE* m_fp;

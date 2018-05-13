@@ -286,23 +286,22 @@ namespace DriveFS{
     void link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname);
 
     void open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-//        SFAsync([=] {
+        try{
             GDriveObject object = getObjectFromInodeAndReq(req, ino);
             if (object->getIsFolder()) {
                 fuse_reply_err(req, EISDIR);
                 return;
             }
 
-//            if (fi->flags & O_WRONLY || fi->flags & O_RDWR) {
-//                fuse_reply_err(req, ENOSYS);
-//                return;
-//            }
             FileIO *io = new FileIO(object, fi->flags, getAccount(req));
             fi->fh = (uintptr_t) io;
 
             fuse_reply_open(req, fi);
             return;
-//        });
+        }catch(std::exception &e){
+            LOG(ERROR) << e.what();
+            fuse_reply_err(req, errno);
+        }
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
@@ -346,8 +345,10 @@ namespace DriveFS{
         }
 
         if(io->write_buffer == nullptr){
+            io->m_event.wait();
             io->create_write_buffer();
             io->create_write_buffer2();
+            io->m_event.signal();
         }
         io->b_needs_uploading = true;
         auto *fsize = &(io->m_file->attribute.st_size);
