@@ -374,9 +374,8 @@ namespace DriveFS{
             off_t off2 =  io->first_write_to_buffer,
                     end2 = io->last_write_to_buffer;
             SFAsync([io, off2,end2] {
-
-                io->stream.seekp(off2);
-                io->stream.write((char *)io->write_buffer2->data(), end2);
+                fseek(io->m_fp, off2, SEEK_SET);
+                fwrite((char *)io->write_buffer2->data(), sizeof(char), end2, io->m_fp);
                 io->m_file->m_event.signal();
                 io->m_event.signal();
 
@@ -397,9 +396,8 @@ namespace DriveFS{
             off_t off2 =  io->first_write_to_buffer,
                     end2 = io->last_write_to_buffer;
             SFAsync([io, off2,end2] {
-
-                io->stream.seekp(off2);
-                io->stream.write((char *)io->write_buffer2->data(), end2);
+                fseek(io->m_fp, off2, SEEK_SET);
+                fwrite((char *)io->write_buffer2->data(), sizeof(char), end2, io->m_fp);
                 io->m_event.signal();
             });
 
@@ -659,10 +657,29 @@ namespace DriveFS{
         fuse_reply_err(req, ENOSYS);
     }
 
-    void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi){
-        fuse_reply_err(req, ENOSYS);
-    }
+    void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi) {
+        struct fuse_bufvec dst = FUSE_BUFVEC_INIT(fuse_buf_size(bufv));
 
+        dst.buf[0].flags = (fuse_buf_flags) (FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK);
+        FileIO *io = (FileIO *) fi->fh;
+        io->b_needs_uploading = true;
+        io->b_needs_uploading = true;
+        dst.buf[0].fd = io->m_fd;
+        dst.buf[0].pos = off;
+
+
+//        fuse_buf_copy(&dst, bufv, FUSE_BUF_SPLICE_NONBLOCK);
+        ssize_t res = fuse_buf_copy(&dst, bufv, (fuse_buf_copy_flags) 0);
+        if (res < 0)
+            fuse_reply_err(req, -res);
+        else {
+            fuse_reply_write(req, (size_t) res);
+            auto temp = off + res;
+            io->m_file->attribute.st_size = temp > io->m_file->attribute.st_size ? temp : io->m_file->attribute.st_size;
+
+        }
+
+    }
     void retrieve_reply(fuse_req_t req, void *cookie, fuse_ino_t ino, off_t offset, struct fuse_bufvec *bufv);
 
     void forget_multi(fuse_req_t req, size_t count, struct fuse_forget_data *forgets){
@@ -719,7 +736,7 @@ namespace DriveFS{
         ops.rename = rename;
         ops.init = init;
         ops.poll = poll;
-//        ops.write_buf = write_buf;
+        ops.write_buf = write_buf;
         ops.setxattr = setxattr;
         ops.removexattr = removexattr;
         return ops;

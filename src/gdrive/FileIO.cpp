@@ -71,12 +71,14 @@ namespace DriveFS{
             if(!isOpen()){
                 open();
             }
-            auto buf = new std::vector<unsigned char>(size);
-            m_event.wait();
-            fseek(m_fp, off, SEEK_SET);
-            fread( (char *) buf->data(), sizeof(char), size, m_fp);
-            m_event.signal();
-            return buf;
+            if(isOpen()) {
+                auto buf = new std::vector<unsigned char>(size);
+                m_event.wait();
+                fseek(m_fp, off, SEEK_SET);
+                fread((char *) buf->data(), sizeof(char), size, m_fp);
+                m_event.signal();
+                return buf;
+            }
         }
         try {
             return getFromCloud(size, off);
@@ -179,7 +181,7 @@ namespace DriveFS{
         }
         __item__.buffer = new std::vector<unsigned char>(filesize, 0);
         __item__.last_access = time(nullptr);
-        fread((void *)( __item__.buffer->data()), sizeof(unsigned char), filesize, fp);
+        auto read_size = fread((char *)( __item__.buffer->data()), sizeof(unsigned char), filesize, fp);
         fclose(fp);
 
         // copy data
@@ -411,7 +413,7 @@ namespace DriveFS{
             clearFileFromCache();
             b_is_cached = true;
             m_file->attribute.st_size = 0;
-            m_fp = fopen(f_name.data(), "rwb");
+            m_fp = fopen(f_name.c_str(), "w+b");
             m_fd = fileno(m_fp);
         }
         else if(m_readable) {
@@ -425,7 +427,11 @@ namespace DriveFS{
             path += ".released";
             if(fs::exists(path)) {
                 m_fp = fopen(path.c_str(), "rb");
-                m_fd = fileno(m_fp);
+                if(m_fp != nullptr) {
+                    m_fd = fileno(m_fp);
+                }else{
+                    LOG(ERROR) << "Error while opening cached file\n" << strerror(errno);
+                }
             }
         }
 

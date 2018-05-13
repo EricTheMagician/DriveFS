@@ -95,6 +95,8 @@ namespace DriveFS {
         off_t last_write_to_buffer, first_write_to_buffer;
         std::fstream stream;
         AutoResetEvent m_event;
+        int m_fd=-1;
+        FILE* m_fp;
 
     private:
         Account *m_account;
@@ -103,6 +105,10 @@ namespace DriveFS {
 
         void clearFileFromCache();
         void setFileName();
+        inline bool isOpen(){
+            return m_fp != nullptr;
+        }
+
 
 
     };
