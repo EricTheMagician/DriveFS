@@ -190,10 +190,12 @@ int main(int argc, char **argv) {
     fuse_args.push_back("-o");
     fuse_args.push_back("noatime");
 
+#if FUSE_USE_VERSION < 30
     if(vm["cache-chunk-size"].as<size_t>() >= 524289) { //512kb+1b
         fuse_args.push_back("-o");
         fuse_args.push_back("max_readahead=1048576"); // 1MB
     }
+#endif
 
     auto s_mountpoint = vm["mount"].as<std::string>();
     fuse_args.push_back(s_mountpoint.c_str());
@@ -206,8 +208,7 @@ int main(int argc, char **argv) {
     if( fuse_parse_cmdline(&args, &opts) != 0){
         return -1;
     }
-    session = fuse_session_new(&args,&ops, sizeof(ops), &account);
-    account.fuse_session = session;
+    account.fuse_session = fuse_session_new(&args,&ops, sizeof(ops), &account);
     if (account.fuse_session == NULL)
         goto err_out1;
 
@@ -248,7 +249,10 @@ int main(int argc, char **argv) {
     fuse_session_add_chan(account.fuse_session, account.fuse_channel);
 
 //    fuse_daemonize(opts.foreground);
-    fuse_session_loop(account.fuse_session);
+    if(multithreaded)
+        fuse_session_loop_mt(account.fuse_session);
+    else
+            fuse_session_loop(account.fuse_session);
 
 #endif
 
