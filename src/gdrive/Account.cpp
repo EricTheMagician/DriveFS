@@ -442,18 +442,11 @@ namespace DriveFS {
                 FileIO *io = new FileIO(object, 0, this);
                 if (io->validateCachedFileForUpload(true)) {
                     auto ele = doc["uploadUrl"];
-//                    LOG(INFO) << "Resuming upload of: " << object->getName();
                     if (ele) {
                         std::string url = ele.get_utf8().value.to_string();
-                        SFAsync([io, url] {
-                            while(!io->resumeFileUploadFromUrl(url)){};
-                            delete io;
-                        });
+                            io->resumeFileUploadFromUrl(url, true);
                     } else {
-                        SFAsync([io] {
-                            io->upload();
-                            delete io;
-                        });
+                        io->upload(true);
                     }
                 } else {
                     delete io;

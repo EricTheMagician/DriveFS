@@ -27,6 +27,7 @@ public:
     File(const char *name):m_event(1), m_handle_creation_event(1), lookupCount(0), m_name(name), m_buffers(nullptr), heap_handles(nullptr){
         memset(&attribute, 0, sizeof(struct stat));
     }
+
     ~File(){
         m_event.signal();
         if(m_buffers != nullptr){
@@ -40,6 +41,7 @@ public:
 
     }
     inline size_t getFileSize() const { return attribute.st_size; }
+    inline const __ino_t & getInode() const { return attribute.st_ino; }
     void create_heap_handles(size_t write_buffer_size);
 public:
     std::vector<WeakBuffer> *m_buffers; // a vector pointing to possible download m_buffers

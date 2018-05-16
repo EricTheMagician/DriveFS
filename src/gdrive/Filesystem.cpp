@@ -19,10 +19,10 @@ namespace DriveFS{
 
     GDriveObject getObjectFromInodeAndReq(fuse_req_t req, ino_t inode){
 
-        auto inodeToObject = &DriveFS::_Object::inodeToObject;
-        const auto cursor = inodeToObject->find(inode);
+        const auto &inodeToObject = DriveFS::_Object::inodeToObject;
+        const auto cursor = inodeToObject.find(inode);
 
-        if(cursor == inodeToObject->cend()){
+        if(cursor == inodeToObject.cend()){
             //object not found
             return nullptr;
         }
@@ -102,7 +102,7 @@ namespace DriveFS{
         if(to_set & FUSE_SET_ATTR_MTIME){
             file->attribute.st_mtim = attr->st_mtim;
         }
-#ifdef USE_FUSE3
+#if FUSE_VERSION >= 30
         if(to_set & FUSE_SET_ATTR_CTIME){
             file->attribute.st_ctim = attr->st_ctim;
         }
@@ -440,7 +440,6 @@ namespace DriveFS{
     }
 
     void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-//        SFAsync([=]{
             FileIO *io = (FileIO *) fi->fh;
             if(io == nullptr){
                 fuse_reply_err(req, EIO);
@@ -453,14 +452,9 @@ namespace DriveFS{
             if(io->b_needs_uploading){
                 //sleep for 3 seconds to make sure that the filesystem has not decided to delete the file.
                 fi->fh = 0;
-                SFAsync([req, ino, io]() {
-                    sleep(3);
-                    auto file = getObjectFromInodeAndReq(req, ino);
-                    if (file) {
-                        io->upload();
-                    }
-                    delete io;
-                });
+                auto file = getObjectFromInodeAndReq(req, ino);
+                io->upload(true);
+
             }else{
                 delete io;
                 fi->fh = 0;

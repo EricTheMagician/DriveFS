@@ -8,6 +8,7 @@
 #include <easylogging++.h>
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio.hpp>
+#include <boost/range/iterator_range.hpp>
 
 
 using namespace web::http::client;          // HTTP client features
@@ -23,6 +24,8 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
 
 }
 static boost::asio::thread_pool DownloadPool;
+static boost::asio::thread_pool UploadPool(2);
+
 namespace DriveFS{
     uint_fast32_t FileIO::write_buffer_size = 64*1024*1024, //64mb
             FileIO::block_read_ahead_start = UINT32_MAX,
@@ -32,7 +35,9 @@ namespace DriveFS{
     bool FileIO::download_last_chunk_at_the_beginning = false;
     bool FileIO::move_files_to_download_on_finish_upload = true;
 
-    fs::path FileIO::cachePath = "/tmp";
+    fs::path FileIO::cachePath = "/tmp/DriveFS";
+    fs::path FileIO::downloadPath = "/tmp/DriveFS/download";
+    fs::path FileIO::uploadPath = "/tmp/DriveFS/upload";
 
     FileIO::FileIO(GDriveObject object, int flag, Account *account):
             m_account(account),
@@ -206,7 +211,9 @@ HTTP_ERROR:
         // copy data
 
         DownloadItem shared = std::make_shared<__no_collision_download__>(std::move(__item__));
-        Object::cache.insert(m_file, getChunkNumber(chunkStart, block_download_size), filesize, shared);
+        uint64_t chunkNumber = getChunkNumber(chunkStart, block_download_size);
+        (*m_file->m_buffers)[chunkNumber] = shared;
+        Object::cache.insert(m_file, chunkNumber, filesize, shared);
         return shared;
 
 
@@ -368,7 +375,7 @@ HTTP_ERROR:
                 auto start = _chunkNumber*block_download_size;
                 std::string cacheName2 = m_file->getId() + "-" + std::to_string(start);
                 DownloadItem item = m_file->m_buffers->at(_chunkNumber).lock();
-                if ( !(item) || item->isInvalid){
+                if ( (!item) || item->isInvalid){
                     DownloadItem cache = std::make_shared<__no_collision_download__>();
                     cache->last_access = time(NULL);
                     cache->name = cacheName2;
@@ -392,6 +399,8 @@ HTTP_ERROR:
                             fread(buf->data(), sizeof(unsigned char), buf->size(), fp);
                             fclose(fp);
                             cache->buffer = buf;
+                            std::atomic_thread_fence(std::memory_order_acquire);
+                            cache->event.signal();
                             continue;
                         }
 
@@ -470,7 +479,34 @@ HTTP_ERROR:
         }
     }
 
-    void FileIO::upload(){
+    void FileIO::upload(bool runAsynchronously){
+        if(runAsynchronously) {
+            boost::asio::defer(UploadPool,
+                               [io = this]() -> void {
+                                   sleep(3);
+
+                                   if (io->checkFileExists()) {
+                                       io->_upload();
+                                   }
+
+
+                                   delete io;
+                               });
+        }else{
+            _upload();
+        }
+
+    }
+
+    bool FileIO::checkFileExists(){
+        // make sure that the file is still valid and not deleted before uploading
+        const auto &inodeToObject = DriveFS::_Object::inodeToObject;
+        const auto cursor = inodeToObject.find(m_file->getInode());
+
+        return cursor != inodeToObject.cend();
+
+    }
+    void FileIO::_upload(){
         m_account->upsertFileToDatabase(m_file);
         std::string uploadUrl = m_account->getUploadUrlForFile(m_file);
 
@@ -481,44 +517,44 @@ HTTP_ERROR:
         LOG(INFO) << "About to upload file \""<< m_file->getName() << "\"";
 
         bool status = m_account->upload(uploadUrl, f_name + ".released", m_file->getFileSize());
-        if(move_files_to_download_on_finish_upload){
-            auto sz = m_file->getFileSize();
-            auto start = 0;
-            FILE *in_fd = fopen(uploadPath.c_str(), "rb");
-//            char buffer[block_download_size];
-            char *buffer = (char *)malloc(sizeof(char) * block_download_size);
-            auto read_size = block_download_size > sz ? sz : block_download_size;
-
-            while( (start + read_size) <= sz){
-
-                fread(buffer, sizeof(char), read_size, in_fd);
-                fs::path out_path = cachePath;
-                out_path /= "download";
-                out_path /= m_file->getId() + "-" + std::to_string(start);
-                FILE* out_fd = fopen(out_path.c_str(),  "wb");
-                if(out_fd == nullptr) {
-                    LOG(ERROR) << "Unable to open file " << out_path.string() << ": "<< strerror(errno);
-                }else{
-                    fwrite(buffer, sizeof(char), read_size, out_fd);
-                    fclose(out_fd);
-                }
-
-                start += read_size;
-                if ((start + read_size) > sz){
-                    read_size = sz - start;
-                }
-
-                if(read_size <= 0 ){
-                    break;
-                }
-
-            }
-
-            fclose(in_fd);
-
-            free(buffer);
-        }
         if(status){
+            if(move_files_to_download_on_finish_upload){
+                auto sz = m_file->getFileSize();
+                auto start = 0;
+                FILE *in_fd = fopen(uploadPath.c_str(), "rb");
+//            char buffer[block_download_size];
+                char *buffer = (char *)malloc(sizeof(char) * block_download_size);
+                auto read_size = block_download_size > sz ? sz : block_download_size;
+
+                while( (start + read_size) <= sz){
+
+                    fread(buffer, sizeof(char), read_size, in_fd);
+                    fs::path out_path = cachePath;
+                    out_path /= "download";
+                    out_path /= m_file->getId() + "-" + std::to_string(start);
+                    FILE* out_fd = fopen(out_path.c_str(),  "wb");
+                    if(out_fd == nullptr) {
+                        LOG(ERROR) << "Unable to open file " << out_path.string() << ": "<< strerror(errno);
+                    }else{
+                        fwrite(buffer, sizeof(char), read_size, out_fd);
+                        fclose(out_fd);
+                    }
+
+                    start += read_size;
+                    if ((start + read_size) > sz){
+                        read_size = sz - start;
+                    }
+
+                    if(read_size <= 0 ){
+                        break;
+                    }
+
+                }
+
+                fclose(in_fd);
+
+                free(buffer);
+            }
             LOG(INFO) << "Successfully uploaded file \""<< m_file->getName() << "\"";
             if( fs::remove(uploadPath) ){
                 LOG(TRACE) << "Removed cache file \""<< m_file->getName() << "\"";
@@ -577,6 +613,16 @@ HTTP_ERROR:
         }
         return false;
     }
+    void FileIO::resumeFileUploadFromUrl(std::string url, bool runAsynchronously){
+        if(runAsynchronously){
+            boost::asio::defer(UploadPool,
+            [io = this, url]()->void{
+                while(!io->resumeFileUploadFromUrl(url));
+                delete io;
+            });
+        }
+    }
+
     bool FileIO::resumeFileUploadFromUrl(std::string url){
         auto start = m_account->getResumableUploadPoint(url, m_file->getFileSize());
         LOG(INFO) << "Resuming upload of: " << m_file->getName();
@@ -604,8 +650,13 @@ HTTP_ERROR:
             }
 
             LOG(INFO) << "Starting from: 0";
-            upload();
+            upload(false);
             return true;
         }
+    }
+
+    void FileIO::checkCacheSize() {
+        for(auto& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {}))
+            std::cout << entry << "\n";
     }
 }

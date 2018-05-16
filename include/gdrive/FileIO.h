@@ -65,7 +65,7 @@ namespace DriveFS {
         /*
          * \brief Resume file upload from this file;
          */
-        bool resumeFileUploadFromUrl(std::string url);
+        void resumeFileUploadFromUrl(std::string url, bool runAsynchronously);
 
         void create_write_buffer();
         void create_write_buffer2();
@@ -93,7 +93,7 @@ namespace DriveFS {
 
         std::vector<unsigned char> * getFromCloud(const size_t &size, const off_t &off);
         DownloadItem getFromCache(fs::path path, uint64_t chunkStart);
-        void upload();
+        void upload(bool runAsynchronously);
 
         std::string f_name; //f_name for the upload, d_name is the base download name
         GDriveObject m_file;
@@ -112,8 +112,10 @@ namespace DriveFS {
     private:
         Account *m_account;
 
+        void _upload();
+        bool checkFileExists();
         void download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
-
+        bool resumeFileUploadFromUrl(std::string url);
         void clearFileFromCache();
         void setFileName();
         inline bool isOpen(){
