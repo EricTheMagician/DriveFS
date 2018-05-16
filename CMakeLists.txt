@@ -47,11 +47,12 @@ target_compile_definitions(${PROJECT_NAME}
 
 #lib fuse3
 find_package(PkgConfig REQUIRED)
-set(USE_FUSE3 0)
+
 if(USE_FUSE3)
     pkg_search_module(LIBFUSE REQUIRED fuse3)
     target_compile_definitions(${PROJECT_NAME} PUBLIC USE_FUSE3
             FUSE_USE_VERSION=31)
+
 else()
     pkg_search_module(LIBFUSE REQUIRED fuse)
     target_compile_definitions(${PROJECT_NAME} PUBLIC
@@ -67,9 +68,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         ./external/adaptive_time_parser
         ./external/semaphore/common
         ./external/easyloggingpp/src
-        ./external/gdrive-cpprest-client
-        ./external/gdrive-cpprest-client/api
-        ./external/gdrive-cpprest-client/model
         /usr/include/openssl-1.0
         /usr/local/include/mongocxx/v_noabi
         /usr/local/include/bsoncxx/v_noabi

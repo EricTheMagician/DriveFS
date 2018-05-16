@@ -4,7 +4,11 @@
 
 #pragma once
 
-#include <fuse_lowlevel.h>
+#if FUSE_USE_VERSION >= 30
+#include <fuse3/fuse_lowlevel.h>
+#else
+#include <fuse/fuse_lowlevel.h>
+#endif
 #include <autoresetevent.h>
 #include "DownloadBuffer.h"
 #include <unistd.h>
