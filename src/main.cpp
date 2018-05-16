@@ -70,8 +70,9 @@ int main(int argc, char **argv) {
      *
      **************/
 
-    if (vm.count("help")) {
-        std::cout << argv[0] << " mountpoint [options]" << "\n";
+    if (vm.count("help") || vm.count("mount") == 0) {
+        std::cout << "Usage:\n";
+        std::cout << argv[0] << " mountpoint [options]" << "\n\n";
         std::cout << all_desc << "\n";
         return 0;
     }
