@@ -36,6 +36,9 @@ namespace DriveFS {
 
 //    typedef std::shared_ptr<__no_collision_download__> DownloadItem;
 
+    void setMaxConcurrentDownload(int n);
+    void setMaxConcurrentUpload(int n);
+
     class FileIO {
 
     public:

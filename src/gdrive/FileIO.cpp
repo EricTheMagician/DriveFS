@@ -23,10 +23,12 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
     return  start / buffer_size;
 
 }
-static boost::asio::thread_pool DownloadPool;
-static boost::asio::thread_pool UploadPool(2);
+
+static boost::asio::thread_pool *DownloadPool;
+static boost::asio::thread_pool *UploadPool;
 
 namespace DriveFS{
+
     uint_fast32_t FileIO::write_buffer_size = 64*1024*1024, //64mb
             FileIO::block_read_ahead_start = UINT32_MAX,
             FileIO::block_read_ahead_end = UINT32_MAX,
@@ -407,7 +409,7 @@ HTTP_ERROR:
                     }
 
 
-                    boost::asio::defer(DownloadPool,
+                    boost::asio::defer(*DownloadPool,
                       [this, start, chunkSize, weak_obj = std::weak_ptr(cache)]()->void
                       {
                           auto strong_obj = weak_obj.lock();
@@ -481,7 +483,7 @@ HTTP_ERROR:
 
     void FileIO::upload(bool runAsynchronously){
         if(runAsynchronously) {
-            boost::asio::defer(UploadPool,
+            boost::asio::defer(*UploadPool,
                                [io = this]() -> void {
                                    sleep(3);
 
@@ -615,7 +617,7 @@ HTTP_ERROR:
     }
     void FileIO::resumeFileUploadFromUrl(std::string url, bool runAsynchronously){
         if(runAsynchronously){
-            boost::asio::defer(UploadPool,
+            boost::asio::defer(*UploadPool,
             [io = this, url]()->void{
                 while(!io->resumeFileUploadFromUrl(url));
                 delete io;
@@ -658,5 +660,20 @@ HTTP_ERROR:
     void FileIO::checkCacheSize() {
         for(auto& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {}))
             std::cout << entry << "\n";
+    }
+
+    void setMaxConcurrentDownload(int n){
+        if(n > 0) {
+            DownloadPool = new boost::asio::thread_pool(n);
+        }else{
+            DownloadPool = new boost::asio::thread_pool;
+        }
+    }
+    void setMaxConcurrentUpload(int n){
+        if(n > 0) {
+            UploadPool = new boost::asio::thread_pool(n);
+        }else{
+            UploadPool = new boost::asio::thread_pool;
+        }
     }
 }

@@ -14,6 +14,8 @@ INITIALIZE_EASYLOGGINGPP;
 int main(int argc, char **argv) {
 
     po::options_description desc("General options"), log_desc("Log Options"), fuse_desc("Fuse Optionns");
+    std::string max_download = std::string("max number of concurrent downloads, defaults to ") + std::to_string(std::thread::hardware_concurrency() );
+    std::string max_upload = std::string("max number of concurrent uploads, defaults to ") + std::to_string(std::thread::hardware_concurrency());
     desc.add_options()
             ("help,h", "this help message")
             ("config-file,c", po::value<std::string>(), "path to a config file. arguments should be one per line")
@@ -26,6 +28,8 @@ int main(int argc, char **argv) {
             ("download-chunks", po::value<int>()->default_value(4), "maximum number of chunks to download ahead")
             ("download-last-chunk", po::value<bool>()->default_value(true), "download the last chunk of a file when downloading the first chunk")
             ("move-to-download", po::value<bool>()->default_value(true), "move a uploaded file to the download cache")
+            ("max-concurrent-downloads", po::value<int>(),  max_download.c_str())
+            ("max-concurrent-uploads", po::value<int>(), max_upload.c_str())
             ;
 
     fuse_desc.add_options()
@@ -128,6 +132,18 @@ int main(int argc, char **argv) {
 
     DriveFS::_Object::cache.m_block_download_size = DriveFS::FileIO::block_download_size;
     DriveFS::_Object::cache.maxCacheSize = vm["cache-size"].as<size_t>() *1024*1024;
+
+    if(vm.count("max-concurrent-downloads")) {
+        DriveFS::setMaxConcurrentDownload(vm["max-concurrent-downloads"].as<int>());
+    }else{
+        DriveFS::setMaxConcurrentDownload(-1);
+    }
+
+    if(vm.count("max-concurrent-uploads")){
+        DriveFS::setMaxConcurrentUpload(vm["max-concurrent-uploads"].as<int>());
+    }else{
+        DriveFS::setMaxConcurrentUpload(-1);
+    }
 
     /************************
      *
