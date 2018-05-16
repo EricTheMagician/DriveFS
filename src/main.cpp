@@ -125,16 +125,6 @@ int main(int argc, char **argv) {
     DriveFS::FileIO::block_download_size = vm["cache-chunk-size"].as<size_t>();
     DriveFS::FileIO::block_read_ahead_end = std::min(DriveFS::FileIO::block_download_size + 128 * 1024, DriveFS::FileIO::block_download_size-1) ;
     DriveFS::FileIO::move_files_to_download_on_finish_upload = vm["move-to-download"].as<bool>();
-    if( fs::exists(DriveFS::FileIO::cachePath) ){
-        if(fs::is_regular_file(DriveFS::FileIO::cachePath)){
-            LOG(ERROR) << DriveFS::FileIO::cachePath << " is a file";
-            return 1;
-        }
-    }else{
-        fs::create_directories(DriveFS::FileIO::cachePath);
-    }
-    fs::create_directories(DriveFS::FileIO::cachePath / "download");
-    fs::create_directories(DriveFS::FileIO::cachePath / "upload");
 
     DriveFS::_Object::cache.m_block_download_size = DriveFS::FileIO::block_download_size;
     DriveFS::_Object::cache.maxCacheSize = vm["cache-size"].as<size_t>() *1024*1024;
@@ -252,7 +242,7 @@ int main(int argc, char **argv) {
     if(multithreaded)
         fuse_session_loop_mt(account.fuse_session);
     else
-            fuse_session_loop(account.fuse_session);
+        fuse_session_loop(account.fuse_session);
 
 #endif
 
