@@ -37,8 +37,8 @@ namespace DriveFS {
         static std::map<std::string, GDriveObject> idToObject;
         static GDriveObject buildTeamDriveHolder(ino_t ino, GDriveObject root);
         static GDriveObject buildTeamDrive(ino_t ino, bsoncxx::document::view document, GDriveObject parent);
-        inline std::string getName() const{return m_name;}
-        inline std::string getId() const{return m_id;}
+        inline const std::string& getName() const{return m_name;}
+        inline const std::string& getId() const{return m_id;}
         inline bool getIsFolder() const {return isFolder;};
         inline void addParent(GDriveObject parent){addRelationship(std::move(parent), parents);};
         bool removeChild(GDriveObject child);

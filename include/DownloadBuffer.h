@@ -34,7 +34,7 @@ public:
         that.buffer = nullptr;
 
         this->size = that.size;
-        this->name = that.name;
+        this->name = std::move(that.name);
         this->last_access = that.last_access;
         this->isInvalid = that.isInvalid;
 
