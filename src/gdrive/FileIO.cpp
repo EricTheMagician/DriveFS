@@ -100,6 +100,10 @@ namespace DriveFS{
     void FileIO::download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
         if(!m_file){
             LOG(ERROR) << "While downloading a file, this->m_file was null for " << cacheName << " ("<<start <<", " << end << ")";
+            if(cache) {
+                cache->isInvalid = true;
+                cache->event.signal();
+            }
             return;
         }
         VLOG(10) << "Downloading " << m_file->getName() <<"\t" << start;
