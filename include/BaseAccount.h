@@ -9,6 +9,8 @@
 #include <cpprest/http_client.h>
 #include <cpprest/http_listener.h>
 #include <autoresetevent.h>
+#include <mongocxx/client.hpp>
+#include <mongocxx/pool.hpp>
 
 using namespace utility;
 using namespace web;
@@ -64,7 +66,6 @@ protected:
     virtual void loadFilesAndFolders() = 0;
     pplx::task<bool> authorization_code_flow();
 
-    mongocxx::pool pool;
     oauth2_config m_oauth2_config;
     http_client_config m_http_config;
     std::unique_ptr<oauth2_code_listener> m_listener;
@@ -76,7 +77,8 @@ protected:
     std::string m_refresh_token;
     int refresh_interval = 300;
     std::chrono::system_clock::time_point m_token_expires_at;
-
+public:
+    mongocxx::pool pool;
 };
 
 

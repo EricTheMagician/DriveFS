@@ -277,7 +277,25 @@ namespace DriveFS{
                 fuse_reply_err(req, EIO);
                 return;
             }
+        }else{
+            Account *account = getAccount(req);
+            account->upsertFileToDatabase(child);
         }
+
+        Account *account = getAccount(req);
+#if FUSE_USE_VERSION >= 30
+        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
+        fuse_lowlevel_notify_inval_inode(account->fuse_session, child->attribute.st_ino, 0, 0);
+        if(newParents)
+            fuse_lowlevel_notify_inval_inode(account->fuse_session, newparent_ino, 0, 0);
+
+#else
+        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
+        fuse_lowlevel_notify_inval_inode(account->fuse_channel, child->attribute.st_ino, 0, 0);
+        if(newParents)
+            fuse_lowlevel_notify_inval_inode(account->fuse_channel, newparent_ino, 0, 0);
+
+#endif
 
         fuse_reply_err(req, 0);
 

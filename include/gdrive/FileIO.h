@@ -48,7 +48,8 @@ namespace DriveFS {
         static uint_fast8_t number_of_blocks_to_read_ahead; // number of blocks to download ahead of time
         static bool download_last_chunk_at_the_beginning; // if true, download the last chunk when downloading the first chunk. useful for media players.
         static bool move_files_to_download_on_finish_upload;
-        FileIO(GDriveObject object, int flag, Account *account);
+        static int64_t maxCacheOnDisk;
+        FileIO(GDriveObject object, int flag);
 
         ~FileIO();
 
@@ -82,6 +83,8 @@ namespace DriveFS {
         bool bufferMatchesExpectedBufferSize(const size_t &bufferSize);
 
         static void checkCacheSize();
+        static int64_t incrementCacheSize(int64_t size);
+        static void deleteFilesFromCacheOnDisk();
         static void setCachePath(const fs::path &path){
             FileIO::cachePath = path;
             FileIO::downloadPath = path / "download";
@@ -113,7 +116,7 @@ namespace DriveFS {
         FILE* m_fp;
 
     private:
-        Account *m_account;
+        static Account* m_account;
 
         void _upload();
         bool checkFileExists();
@@ -128,6 +131,14 @@ namespace DriveFS {
         static fs::path cachePath;
         static fs::path downloadPath;
         static fs::path  uploadPath;
+        static std::atomic_int64_t cacheSize;
+    public:
+        static void setAccount(Account* account){
+            m_account = account;
+        }
+        inline static int64_t getDiskCacheSize(){
+            return cacheSize.load(std::memory_order_relaxed);
+        }
 
 
     };

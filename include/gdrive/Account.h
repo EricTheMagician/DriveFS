@@ -17,8 +17,6 @@
 #include <bsoncxx/document/value.hpp>
 #include <bsoncxx/document/view.hpp>
 #include <bsoncxx/json.hpp>
-#include <mongocxx/client.hpp>
-#include <mongocxx/pool.hpp>
 #include "easylogging++.h"
 #include <boost/circular_buffer.hpp>
 #include <string_view>
@@ -48,7 +46,7 @@ namespace DriveFS {
         }
 
         inline void refresh_token(int backoff=0){
-            m_id_buffer.clear();
+//            m_id_buffer.clear();
             BaseAccount::refresh_token(backoff);
         };
 
@@ -77,6 +75,7 @@ namespace DriveFS {
 
         std::map<std::string, std::string> m_newStartPageToken; // map teamDriveId to newStartPageToken
         std::atomic<ino_t> inode_count = 1;
+
     };
 };
 

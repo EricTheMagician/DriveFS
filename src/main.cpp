@@ -17,14 +17,14 @@ int main(int argc, char **argv) {
     std::string max_download = std::string("max number of concurrent downloads, defaults to ") + std::to_string(std::thread::hardware_concurrency() );
     std::string max_upload = std::string("max number of concurrent uploads, defaults to ") + std::to_string(std::thread::hardware_concurrency());
     desc.add_options()
-            ("help,h", "this help message")
+            ("help,h", "t his help message")
             ("config-file,c", po::value<std::string>(), "path to a config file. arguments should be one per line")
             ("mount", po::value<std::string>(), "set the mount point. useful for config files")
             ("database", po::value<std::string>()->default_value("mongodb://localhost/"), "set the database path")
             ("cache-location", po::value<std::string>()->default_value("/tmp/DriveFS"))
             ("cache-chunk-size", po::value<size_t>()->default_value(8*1024*1024), "size of segments to download, in bytes, default: 8MB")
             ("cache-size", po::value<size_t>()->default_value(512), "maximum amount of memory to be used for in memory cache. values in MB. Default: 512MB")
-            ("cache-disk-size", po::value<size_t>(), "maximum size of the cache on disk. only for downloads. currently not used.")
+            ("cache-disk-size", po::value<size_t>()->default_value(512), "maximum size of the cache on disk, in megabytes. only for downloads, defaults to 512MB")
             ("download-chunks", po::value<int>()->default_value(4), "maximum number of chunks to download ahead")
             ("download-last-chunk", po::value<bool>()->default_value(true), "download the last chunk of a file when downloading the first chunk")
             ("move-to-download", po::value<bool>()->default_value(true), "move a uploaded file to the download cache")
@@ -121,9 +121,6 @@ int main(int argc, char **argv) {
      *
      ********************/
 
-//            ("cache-size", po::value<size_t>()->default_value(512), "maximum amount of memory to be used for in memory cache. values in MB. Default: 512MB")
-//            ("cache-disk-size", po::value<size_t>(), "maximum size of the cache on disk. only for downloads. currently not used.")
-
     DriveFS::FileIO::download_last_chunk_at_the_beginning = vm["download-last-chunk"].as<bool>();
     DriveFS::FileIO::setCachePath(vm["cache-location"].as<std::string>());
     DriveFS::FileIO::number_of_blocks_to_read_ahead = vm["download-chunks"].as<int>();
@@ -146,6 +143,7 @@ int main(int argc, char **argv) {
         DriveFS::setMaxConcurrentUpload(-1);
     }
 
+
     /************************
      *
      * Setup the user account
@@ -157,6 +155,10 @@ int main(int argc, char **argv) {
     DriveFS::Account account = DriveFS::Account::getAccount(
             vm["database"].as<std::string>()
     );
+    DriveFS::FileIO::setAccount(&account);
+    DriveFS::FileIO::maxCacheOnDisk = vm["cache-disk-size"].as<size_t>()*1024*1024;
+    DriveFS::FileIO::checkCacheSize();
+    LOG(INFO) << "Current size of cache is " << ( (double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 /1024.0 << " GB";
 
     if(account.needToInitialize()) {
         account.run();
