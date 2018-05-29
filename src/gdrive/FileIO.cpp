@@ -524,45 +524,9 @@ HTTP_ERROR:
 
         bool status = m_account->upload(uploadUrl, f_name + ".released", m_file->getFileSize());
         if(status){
-            if(move_files_to_download_on_finish_upload){
-                auto sz = m_file->getFileSize();
-                auto start = 0;
-                FILE *in_fd = fopen(uploadPath.c_str(), "rb");
-//            char buffer[block_download_size];
-                char *buffer = (char *)malloc(sizeof(char) * block_download_size);
-                auto read_size = block_download_size > sz ? sz : block_download_size;
-
-                while( (start + read_size) <= sz){
-
-                    fread(buffer, sizeof(char), read_size, in_fd);
-                    fs::path out_path = cachePath;
-                    out_path /= "download";
-                    out_path /= m_file->getId() + "-" + std::to_string(start);
-                    FILE* out_fd = fopen(out_path.c_str(),  "wb");
-                    if(out_fd == nullptr) {
-                        LOG(ERROR) << "Unable to open file " << out_path.string() << ": "<< strerror(errno);
-                    }else{
-                        fwrite(buffer, sizeof(char), read_size, out_fd);
-                        fclose(out_fd);
-                    }
-
-                    start += read_size;
-                    if ((start + read_size) > sz){
-                        read_size = sz - start;
-                    }
-
-                    if(read_size <= 0 ){
-                        break;
-                    }
-
-                }
-
-                fclose(in_fd);
-
-                free(buffer);
-            }
+            move_files_to_download_after_finish_uploading();
             LOG(INFO) << "Successfully uploaded file \""<< m_file->getName() << "\"";
-            if( fs::remove(uploadPath) ){
+            if( fs::remove(uploadFileName) ){
                 LOG(TRACE) << "Removed cache file \""<< m_file->getName() << "\"";
             }else{
                 LOG(ERROR) << "There was an error removing file \""<< m_file->getName() << "\" from cache";
@@ -574,6 +538,78 @@ HTTP_ERROR:
         }
     }
 
+    void FileIO::move_files_to_download_after_finish_uploading() {
+        if(move_files_to_download_on_finish_upload){
+            auto uploadFileName = f_name + ".released";
+            if(fs::exists(uploadFileName)) {
+                LOG(DEBUG) << "Moving " << m_file->getName() << " from upload cache to download cache";
+                try {
+                    auto sz = m_file->getFileSize();
+                    auto start = 0;
+                    FILE *in_fd = fopen(uploadFileName.c_str(), "rb");
+
+                    LOG_IF(in_fd == nullptr, ERROR) << "Failed to open input file " << uploadFileName << "\nReasonm: "
+                                                    << strerror(errno);
+                    auto *buffer = new char[block_download_size];
+//                    LOG_IF(buffer == nullptr, ERROR) << "Failed to allocate memory"  << "\nReason: " << strerror(errno);
+
+                    auto read_size = block_download_size > sz ? sz : block_download_size;
+                    if (in_fd != nullptr) {
+                        while ((start + read_size) <= sz) {
+
+                            LOG(TRACE) << "Reading chunk " << start / block_download_size << " after upload "
+                                       << uploadFileName;
+                            fseek(in_fd, start, SEEK_SET);
+                            auto read = fread(buffer, sizeof(char), read_size, in_fd);
+                            if (read != read_size) {
+                                LOG(ERROR) << "When reading file " << uploadFileName << ", (r: " << read << ", e: "
+                                           << read_size << " there was an error: " << strerror(errno);
+                            } else {
+                                fs::path out_path = cachePath;
+                                out_path /= "download";
+                                out_path /= m_file->getId() + "-" + std::to_string(start);
+                                FILE *out_fd = fopen(out_path.c_str(), "wb");
+                                if (out_fd == nullptr) {
+                                    LOG(ERROR) << "Unable to open file " << out_path.string() << ": "
+                                               << strerror(errno);
+                                } else {
+                                    LOG(TRACE) << "Writing chunk after upload " << out_path.string();
+                                    auto wrote = fwrite(buffer, sizeof(char), read, out_fd);
+                                    if (wrote != read) {
+                                        LOG(ERROR) << "When writing file " << out_path.string() << ", (w: " << wrote
+                                                   << ", e: " << read_size << " there was an error: "
+                                                   << strerror(errno);
+                                    }
+                                    fclose(out_fd);
+                                }
+                            }
+
+                            start += read_size;
+                            if ((start + read_size) > sz) {
+                                read_size = sz - start;
+                            }
+
+                            if (read_size <= 0) {
+                                break;
+                            }
+
+                        }
+                    }
+                    if (in_fd != nullptr) {
+                        fclose(in_fd);
+                        in_fd = nullptr;
+                    }
+                    delete[] buffer;
+
+                } catch (std::exception &e) {
+                    LOG(ERROR) << "There was an error when trying to move the file from upload to download: "
+                               << e.what();
+                }
+            }
+
+        }
+
+    }
     void FileIO::release(){
 
         if(last_write_to_buffer >0 && isOpen()){
@@ -634,7 +670,19 @@ HTTP_ERROR:
         LOG(INFO) << "Resuming upload of: " << m_file->getName();
         if(start && start.value() >= 0){
             LOG(INFO) << "Starting from: " << start.value() / 1024 / 1024  << "MB / " << m_file->getFileSize()/1024/1024 << "MB  " << (int) ((double) start.value() / (double) m_file->getFileSize() * 100.0) << "%";
-            return m_account->upload(url, f_name + ".released", m_file->getFileSize(), start.value());
+            bool status = m_account->upload(url, f_name + ".released", m_file->getFileSize(), start.value());
+            if(status){
+                move_files_to_download_after_finish_uploading();
+                LOG(INFO) << "Successfully uploaded file \""<< m_file->getName() << "\"";
+                if( fs::remove(f_name + ".released") ){
+                    LOG(TRACE) << "Removed cache file \""<< m_file->getName() << "\"";
+                }else{
+                    LOG(ERROR) << "There was an error removing file \""<< m_file->getName() << "\" from cache";
+                }
+
+            }
+
+            return status;
         }else{
             if(m_file->getIsUploaded()) {
                 fs::path path = f_name;

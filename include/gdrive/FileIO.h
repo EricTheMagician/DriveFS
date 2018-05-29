@@ -122,6 +122,7 @@ namespace DriveFS {
         bool checkFileExists();
         void download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
         bool resumeFileUploadFromUrl(std::string url);
+        void move_files_to_download_after_finish_uploading();
         void clearFileFromCache();
         void setFileName();
         inline bool isOpen(){
