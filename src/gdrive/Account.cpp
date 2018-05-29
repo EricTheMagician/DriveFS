@@ -405,12 +405,14 @@ namespace DriveFS {
     }
 
     void Account::loadFilesAndFolders() {
-        LOG(TRACE) << "Filling GDrive Cache";
+        LOG(TRACE) << "Filling GDrive file information from cache";
         bool needs_updating = false;
         mongocxx::pool::entry conn = pool.acquire();
         mongocxx::database client = conn->database(std::string(DATABASENAME));
         mongocxx::collection db = client[std::string(DATABASEDATA)];
-
+        mongocxx::options::index index_options;
+        index_options.unique(true);
+        db.create_index(document{} << "index" << 1 << finalize, index_options);
         //find root
 
         auto maybeRoot = db.find_one(document{} << "name" << "My Drive"
@@ -669,6 +671,11 @@ namespace DriveFS {
             mongocxx::database client = conn->database(std::string(DATABASENAME));
             mongocxx::collection data = client[std::string(DATABASEDATA)];
             mongocxx::collection settings = client[std::string(DATABASESETTINGS)];
+            mongocxx::options::index index_options;
+            if(data.count(document{}<<finalize) == 0) {
+                index_options.unique(true);
+                data.create_index(document{} << "index" << 1 << finalize, index_options);
+            }
 
             if (needs_updating) {
                 data.bulk_write(documents);
@@ -930,17 +937,16 @@ namespace DriveFS {
     void Account::upsertFileToDatabase(GDriveObject file) {
 
         if (file) {
+            mongocxx::pool::entry conn = pool.acquire();
+            mongocxx::database client = conn->database(std::string(DATABASENAME));
+            mongocxx::collection data = client[std::string(DATABASEDATA)];
             try {
-                mongocxx::pool::entry conn = pool.acquire();
-                mongocxx::database client = conn->database(std::string(DATABASENAME));
-                mongocxx::collection data = client[std::string(DATABASEDATA)];
+                auto count = data.count(document{} << "id" << file->getId() << finalize);
                 auto status = data.update_one(
                         document{} << "id" << file->getId() << finalize,
-                        document{} << "$set" << open_document << concatenate(file->to_bson()) << close_document
+                        document{} << "$set" << open_document << concatenate(file->to_bson(count == 0)) << close_document
                                    << finalize,
-                        upsert
-                );
-                status;
+                        upsert);
             } catch (std::exception &e) {
                 LOG(ERROR) << e.what();
             }

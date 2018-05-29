@@ -415,11 +415,13 @@ namespace DriveFS{
         return nullptr;
     }
 
-    bsoncxx::document::value _Object::to_bson() const
+    bsoncxx::document::value _Object::to_bson(bool includeId) const
     {
 
         bsoncxx::builder::stream::document doc;
-        doc << "id" << m_id;
+        if(includeId) {
+            doc << "id" << m_id;
+        }
         if(isFolder) {
             doc << "mimeType" << "application/vnd.google-apps.folder";
         }else{

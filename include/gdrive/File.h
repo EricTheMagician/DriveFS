@@ -54,7 +54,7 @@ namespace DriveFS {
         void trash();
         std::string md5() const { return md5Checksum; };
         GDriveObject findChildByName( const char *name) const ;
-        bsoncxx::document::value to_bson() const;
+        bsoncxx::document::value to_bson(bool includeId=true) const;
         bsoncxx::document::value to_rename_bson() const;
         std::string getCreatedTimeAsString() const;
         void setName(const char *name){
