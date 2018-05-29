@@ -396,29 +396,29 @@ HTTP_ERROR:
                     fs::path path(cachePath);
                     path /= "download";
                     path /= cacheName2;
-                    if(fs::exists(path)){
-                        FILE *fp = fopen(path.string().c_str(), "rb");
-                        if(fp != nullptr){
-
-                            auto fsize = fs::file_size(path);
-                            auto buf = new std::vector<unsigned char>(fsize);
-                            fread(buf->data(), sizeof(unsigned char), buf->size(), fp);
-                            fclose(fp);
-                            cache->buffer = buf;
-                            std::atomic_thread_fence(std::memory_order_acquire);
-                            cache->event.signal();
-                            continue;
-                        }
-
-                    }
 
 
                     boost::asio::defer(*DownloadPool,
-                      [this, start, chunkSize, weak_obj = std::weak_ptr(cache)]()->void
+                      [io=this, start, chunkSize, path, weak_obj = std::weak_ptr(cache)]()->void
                       {
                           auto strong_obj = weak_obj.lock();
+
                           if(strong_obj) {
-                              this->download(strong_obj, strong_obj->name, start, start + chunkSize - 1, 0);
+                              if(fs::exists(path)){
+                                  FILE *fp = fopen(path.string().c_str(), "rb");
+                                  if(fp != nullptr){
+                                      auto fsize = fs::file_size(path);
+                                      auto buf = new std::vector<unsigned char>(fsize);
+                                      fread(buf->data(), sizeof(unsigned char), buf->size(), fp);
+                                      fclose(fp);
+                                      strong_obj->buffer = buf;
+                                      std::atomic_thread_fence(std::memory_order_acquire);
+                                      strong_obj->event.signal();
+                                      return;
+                                  }
+                              }else {
+                                  io->download(strong_obj, strong_obj->name, start, start + chunkSize - 1, 0);
+                              }
                           }
                       });
                 }
