@@ -489,9 +489,13 @@ HTTP_ERROR:
         if(runAsynchronously) {
             boost::asio::defer(*UploadPool,
                                [io = this]() -> void {
-                                   sleep(3);
 
                                    if (io->checkFileExists()) {
+                                       sleep(3);
+                                       // file can have no parents happen when launching DriveFS
+                                       // so wait until it is filled
+                                       while(io->m_file->parents.empty());
+
                                        io->_upload();
                                    }
 
@@ -545,61 +549,67 @@ HTTP_ERROR:
                 LOG(DEBUG) << "Moving " << m_file->getName() << " from upload cache to download cache";
                 try {
                     auto sz = m_file->getFileSize();
+                    auto sz_actual = fs::file_size(uploadFileName);
+                    if(sz != sz_actual){
+                        LOG(ERROR) << "file size in database is not the same as the actual fileSize";
+                        LOG(TRACE) << "id: " << m_file->getId();
+                        sz = sz_actual;
+                    }
                     auto start = 0;
-                    FILE *in_fd = fopen(uploadFileName.c_str(), "rb");
+                    int in_fd= ::open(uploadFileName.c_str(), O_RDONLY);
 
-                    LOG_IF(in_fd == nullptr, ERROR) << "Failed to open input file " << uploadFileName << "\nReasonm: "
-                                                    << strerror(errno);
-                    auto *buffer = new char[block_download_size];
-//                    LOG_IF(buffer == nullptr, ERROR) << "Failed to allocate memory"  << "\nReason: " << strerror(errno);
+                    if(in_fd < 0) {
+                        LOG(ERROR) << "Failed to open input file " << uploadFileName << "\nReasonm: "
+                                   << strerror(errno);
+                        return;
+                    }
 
                     auto read_size = block_download_size > sz ? sz : block_download_size;
-                    if (in_fd != nullptr) {
-                        while ((start + read_size) <= sz) {
+                    while ((start + read_size) <= sz) {
 
-                            LOG(TRACE) << "Reading chunk " << start / block_download_size << " after upload "
-                                       << uploadFileName;
-                            fseek(in_fd, start, SEEK_SET);
-                            auto read = fread(buffer, sizeof(char), read_size, in_fd);
-                            if (read != read_size) {
-                                LOG(ERROR) << "When reading file " << uploadFileName << ", (r: " << read << ", e: "
-                                           << read_size << " there was an error: " << strerror(errno);
-                            } else {
-                                fs::path out_path = cachePath;
-                                out_path /= "download";
-                                out_path /= m_file->getId() + "-" + std::to_string(start);
-                                FILE *out_fd = fopen(out_path.c_str(), "wb");
-                                if (out_fd == nullptr) {
-                                    LOG(ERROR) << "Unable to open file " << out_path.string() << ": "
-                                               << strerror(errno);
-                                } else {
-                                    LOG(TRACE) << "Writing chunk after upload " << out_path.string();
-                                    auto wrote = fwrite(buffer, sizeof(char), read, out_fd);
-                                    if (wrote != read) {
-                                        LOG(ERROR) << "When writing file " << out_path.string() << ", (w: " << wrote
-                                                   << ", e: " << read_size << " there was an error: "
-                                                   << strerror(errno);
+                        fs::path out_path = cachePath;
+                        out_path /= "download";
+                        out_path /= m_file->getId() + "-" + std::to_string(start);
+                        int out_fd = ::open(out_path.c_str(), O_WRONLY | O_CREAT);
+
+
+                        if (out_fd < 0) {
+                            LOG(ERROR) << "Unable to open file " << out_path.string() << ": "
+                                       << strerror(errno);
+                        } else {
+                            VLOG(9) << "Writing chunk after upload " << out_path.string();
+                            size_t totalCopied = 0;
+                            off_t offset = start + totalCopied;
+                            while(totalCopied < read_size){
+                                auto copied = sendfile(out_fd, in_fd, &offset, read_size-totalCopied);
+                                if(copied < 0){
+                                    if (errno == EINTR || errno == EAGAIN) {
+                                        // Interrupted system call/try again
+                                        // Just skip to the top of the loop and try again
+                                        continue;
                                     }
-                                    fclose(out_fd);
+                                    LOG(ERROR) << "There was an error with copying file chunk: " << strerror(errno);
+                                    break;
                                 }
+
+                                totalCopied += copied;
                             }
 
-                            start += read_size;
-                            if ((start + read_size) > sz) {
-                                read_size = sz - start;
-                            }
-
-                            if (read_size <= 0) {
-                                break;
-                            }
-
+                            close(out_fd);
                         }
+
+
+                        start += read_size;
+                        if ((start + read_size) > sz) {
+                            read_size = sz - start;
+                        }
+
+                        if (read_size <= 0 || read_size > block_download_size) {
+                            break;
+                        }
+
                     }
-                    if (in_fd != nullptr) {
-                        fclose(in_fd);
-                        in_fd = nullptr;
-                    }
-                    delete[] buffer;
+                    close(in_fd);
 
                 } catch (std::exception &e) {
                     LOG(ERROR) << "There was an error when trying to move the file from upload to download: "
