@@ -429,6 +429,7 @@ namespace DriveFS{
             _Object::inodeToObject.erase(attribute.st_ino);
             _Object::idToObject.erase(m_id);
         }
+        trashed = true;
     }
 
     GDriveObject _Object::findChildByName(const char *name) const {

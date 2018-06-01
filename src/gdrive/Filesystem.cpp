@@ -168,13 +168,16 @@ namespace DriveFS{
                 children->erase(children->begin() + i);
                 parent->m_event.signal();
                 signaled = true;
-                child->m_event.wait();
 
                 if (child->getIsUploaded()) {
+                    child->m_event.wait();
                     account->removeChildFromParent(child, parent);
                     child->trash();
+                    child->m_event.signal();
                 }else{
+                    child->trash();
                     account->upsertFileToDatabase(child);
+
                 }
 
 #if FUSE_USE_VERSION >= 30
@@ -184,7 +187,6 @@ namespace DriveFS{
 #endif
 
 
-                child->m_event.signal();
                 break;
             }
         }
