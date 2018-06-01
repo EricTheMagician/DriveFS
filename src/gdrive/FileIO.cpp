@@ -9,8 +9,12 @@
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio.hpp>
 #include <boost/range/iterator_range.hpp>
+#include <gdrive/Account.h>
+#include <mutex>
+#include <sys/sendfile.h>
 
-
+static std::mutex deleteCacheMutex;
+#define DBCACHENAME "FileCacheDB"
 using namespace web::http::client;          // HTTP client features
 using Object = DriveFS::_Object;
 
@@ -36,13 +40,16 @@ namespace DriveFS{
     uint_fast8_t FileIO::number_of_blocks_to_read_ahead = 0;
     bool FileIO::download_last_chunk_at_the_beginning = false;
     bool FileIO::move_files_to_download_on_finish_upload = true;
+    std::atomic_int64_t FileIO::cacheSize = 0;
+    Account* FileIO::m_account = nullptr;
+    int64_t FileIO::maxCacheOnDisk = 0;
+
 
     fs::path FileIO::cachePath = "/tmp/DriveFS";
     fs::path FileIO::downloadPath = "/tmp/DriveFS/download";
     fs::path FileIO::uploadPath = "/tmp/DriveFS/upload";
 
-    FileIO::FileIO(GDriveObject object, int flag, Account *account):
-            m_account(account),
+    FileIO::FileIO(GDriveObject object, int flag):
             m_file(std::move(object)),
             b_is_uploading(false),
             b_is_cached(false),
@@ -132,13 +139,22 @@ namespace DriveFS{
             resp = client.request(req).get();
         }catch(std::exception &e){
             LOG(ERROR) << "There was an error while trying to download chunk";
-            LOG(DEBUG) << "File ID " << m_file->getId();
-            LOG(DEBUG) << "File Size " << m_file->getFileSize();
+            LOG(DEBUG) << "Chunk-range" << start << " - " << end;
+            if(m_file) {
+                LOG(DEBUG) << "File ID " << m_file->getId();
+                LOG(DEBUG) << "File Size " << m_file->getFileSize();
+            }
             LOG(DEBUG) << "Url " << builder.to_string();
-            goto HTTP_ERROR;
+            const unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 10) {
+                download(cache, std::move(cacheName), start, end, backoff);
+            }
+            return;
+
         };
         if(resp.status_code() != 206 && resp.status_code() != 200){
-HTTP_ERROR:
             LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
             LOG(ERROR) << resp.extract_json(true).get();
             const unsigned int sleep_time = std::pow(2, backoff);
@@ -510,23 +526,26 @@ HTTP_ERROR:
 
     bool FileIO::checkFileExists(){
         // make sure that the file is still valid and not deleted before uploading
-        const auto &inodeToObject = DriveFS::_Object::inodeToObject;
-        const auto cursor = inodeToObject.find(m_file->getInode());
+        const auto cursor = DriveFS::_Object::inodeToObject.find(m_file->getInode());
 
-        return cursor != inodeToObject.cend();
+        const bool temp = cursor == DriveFS::_Object::inodeToObject.cend();
+
+
+        LOG_IF(temp, DEBUG) << "Cached file no longer exists with name " << m_file->getName() << " and id " << m_file->getId();
+
+        return !temp;
 
     }
     void FileIO::_upload(){
-        m_account->upsertFileToDatabase(m_file);
         std::string uploadUrl = m_account->getUploadUrlForFile(m_file);
 
         // make sure that the file is no longer setting attribute
         m_file->m_event.wait();
         m_file->m_event.signal();
-        auto uploadPath = f_name + ".released";
+        auto uploadFileName = f_name + ".released";
         LOG(INFO) << "About to upload file \""<< m_file->getName() << "\"";
 
-        bool status = m_account->upload(uploadUrl, f_name + ".released", m_file->getFileSize());
+        bool status = m_account->upload(uploadUrl, uploadFileName, m_file->getFileSize());
         if(status){
             move_files_to_download_after_finish_uploading();
             LOG(INFO) << "Successfully uploaded file \""<< m_file->getName() << "\"";
@@ -631,10 +650,12 @@ HTTP_ERROR:
         }
 
         if(b_needs_uploading){
+            m_account->upsertFileToDatabase(m_file);
 
             fs::path released;
             if(f_name.empty()) {
-                released = fs::path(m_file->getId());
+                released = uploadPath;
+                released /= m_file->getId();
             }else{
                 released = fs::path(f_name);
             }
@@ -643,7 +664,9 @@ HTTP_ERROR:
                 fs::rename(f_name, released);
             }catch(std::exception &e){
                 LOG(ERROR) << e.what() << std::endl << m_file->getName() << "\t" << m_file->getId();
+                b_needs_uploading = false;
             }
+
         }
 
 
@@ -669,9 +692,16 @@ HTTP_ERROR:
         if(runAsynchronously){
             boost::asio::defer(*UploadPool,
             [io = this, url]()->void{
+
+                // file can have no parents happen when launching DriveFS
+                // so wait until it is filled
+                while(io->m_file->parents.empty());
+
                 while(!io->resumeFileUploadFromUrl(url));
                 delete io;
             });
+        }else{
+            while(!resumeFileUploadFromUrl(url));
         }
     }
 
@@ -706,36 +736,153 @@ HTTP_ERROR:
                 if(value < 0){
                     value = -value;
 
-                    if(value == 400){
-                        m_file->setNewId(m_account->getNextId());
-                    }
+//                    if(value == 400){
+//                        m_file->setNewId(m_account->getNextId());
+//                    }
 
                 }
             }
 
-            LOG(INFO) << "Starting from: 0";
+            LOG(INFO) << "Starting from: 0 / " << m_file->getFileSize() / 1024/1024 << " MB" ;
             upload(false);
             return true;
         }
     }
 
     void FileIO::checkCacheSize() {
-        for(auto& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {}))
-            std::cout << entry << "\n";
+
+        mongocxx::pool::entry conn = m_account->pool.acquire();
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DBCACHENAME)];
+
+        // reset the database to mark all unvisited files
+        db.update_many(
+                document{} << finalize,
+                document{} << "$set" << open_document << "exist" << false << close_document << finalize
+        );
+
+        mongocxx::bulk_write documents;
+        size_t size;
+        time_t mtime;
+        struct stat st;
+        memset(&st, 0, sizeof(struct stat));
+
+        bool needsUpdating = false;
+
+        for(fs::directory_entry& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {})) {
+//            std::cout << entry << "\n";
+            if(fs::exists(entry)) {
+                needsUpdating = true;
+                size = fs::file_size(entry);
+                incrementCacheSize(size);
+                auto path = entry.path();
+                stat(path.string().c_str(), &st);
+
+                mongocxx::model::update_one upsert_op(
+                        document{} << "filename" << path.string() << finalize,
+                        document{} << "$set" << open_document
+                                   << "filename" << path.string()
+                                   << "size" << ((int64_t) size)
+                                   << "mtime" << st.st_mtim.tv_sec
+                                   << "exists" << true
+                                   << close_document << finalize
+                );
+
+                upsert_op.upsert(true);
+                documents.append(upsert_op);
+            }
+
+
+        }
+        if(needsUpdating)
+            db.bulk_write(documents);
     }
 
     void setMaxConcurrentDownload(int n){
         if(n > 0) {
             DownloadPool = new boost::asio::thread_pool(n);
         }else{
-            DownloadPool = new boost::asio::thread_pool;
+            DownloadPool = new boost::asio::thread_pool(std::thread::hardware_concurrency());
         }
     }
     void setMaxConcurrentUpload(int n){
         if(n > 0) {
             UploadPool = new boost::asio::thread_pool(n);
         }else{
-            UploadPool = new boost::asio::thread_pool;
+            UploadPool = new boost::asio::thread_pool(std::thread::hardware_concurrency());
         }
+    }
+
+    void FileIO::deleteFilesFromCacheOnDisk(){
+
+        int64_t oldSize = FileIO::cacheSize.load(std::memory_order_relaxed);
+        int64_t workingSize = oldSize,
+        targetSize = ((double)FileIO::maxCacheOnDisk) * 0.9;
+
+        LOG(INFO) << "Deleting files until target size is reached";
+        LOG(DEBUG) << "Target Size: " << targetSize;
+        LOG(DEBUG) << "Current Size: "  << oldSize;
+
+        mongocxx::pool::entry conn = m_account->pool.acquire();
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DBCACHENAME)];
+
+        mongocxx::options::find options;
+        options.sort( document{} << "mtime" << -1 << finalize);
+        auto cursor = db.find(
+                document{} << "exists" << true << finalize,
+                options
+        );
+        auto toDelete = bsoncxx::builder::basic::array{};
+        for( auto doc: cursor){
+            std::string filename = doc["filename"].get_utf8().value.to_string();
+            int64_t size = doc["size"].get_int64().value;
+            workingSize -= size;
+            unlink(filename.c_str());
+            toDelete.append(filename);
+            if(workingSize < targetSize){
+                break;
+            }
+        }
+
+        db.delete_many(
+                document{} << "filename" << open_document << "$in" << toDelete << close_document << finalize
+        );
+
+        int64_t delta = workingSize-oldSize;
+        incrementCacheSize(delta);
+
+
+
+    }
+
+    int64_t FileIO::incrementCacheSize(int64_t size){
+        int64_t oldSize = FileIO::cacheSize.load(std::memory_order_relaxed);
+        for (;;)    // Increment the cacheSize atomically via CAS loop.
+        {
+            int64_t newSize =  oldSize + size ;
+            if(newSize < 0){
+                newSize = 0;
+            };
+            if (FileIO::cacheSize.compare_exchange_weak(oldSize, newSize, std::memory_order_release, std::memory_order_relaxed)){
+
+                if(newSize > maxCacheOnDisk) {
+                    if (deleteCacheMutex.try_lock()) {
+
+                        deleteFilesFromCacheOnDisk();
+
+                        deleteCacheMutex.unlock();
+
+                    }
+                }
+
+
+
+                return newSize;
+            }
+            // The compare-exchange failed, likely because another thread changed size.
+            // oldStatus has been updated. Retry the CAS loop.
+        }
+
     }
 }

@@ -369,18 +369,43 @@ namespace DriveFS{
             auto maybeProperty = appProperties[APP_UID];
             if(maybeProperty){
                 uid_found = true;
-                attribute.st_uid = maybeProperty.get_int32();
+                if(maybeProperty.type() == bsoncxx::type::k_int32) {
+                    attribute.st_uid = maybeProperty.get_int32();
+                }else if(maybeProperty.type() == bsoncxx::type::k_int64){
+                    attribute.st_uid = maybeProperty.get_int64();
+                }else if(maybeProperty.type() == bsoncxx::type::k_utf8){
+                    attribute.st_uid = std::strtoul(maybeProperty.get_utf8().value.to_string().c_str(), nullptr, 10);
+                }else{
+                    LOG(INFO)<< "type is " << (uint8_t) maybeProperty.type();
+//                    attribute.st_uid = maybeProperty.get_int32();
+                }
             }
 
             maybeProperty = appProperties[APP_GID];
             if(maybeProperty){
                 gid_found = true;
-                attribute.st_gid = maybeProperty.get_int32();
+                if(maybeProperty.type() == bsoncxx::type::k_int32) {
+                    attribute.st_gid = maybeProperty.get_int32();
+                }else if(maybeProperty.type() == bsoncxx::type::k_int64){
+                    attribute.st_gid = maybeProperty.get_int64();
+                }else if(maybeProperty.type() == bsoncxx::type::k_utf8){
+                    attribute.st_gid = std::strtoul(maybeProperty.get_utf8().value.to_string().c_str(), nullptr, 10);
+                }else{
+ //                   attribute.st_gid = maybeProperty.get_int32();
+                }
             }
 
             maybeProperty = appProperties[APP_MODE];
             if(maybeProperty){
-                attribute.st_mode = maybeProperty.get_int32();
+                if(maybeProperty.type() == bsoncxx::type::k_int32) {
+                    attribute.st_mode = maybeProperty.get_int32();
+                }else if(maybeProperty.type() == bsoncxx::type::k_int64){
+                    attribute.st_mode = maybeProperty.get_int64();
+                }else if(maybeProperty.type() == bsoncxx::type::k_utf8){
+                    attribute.st_mode = std::strtoul(maybeProperty.get_utf8().value.to_string().c_str(), nullptr, 10);
+                }else{
+   ///                 attribute.st_mode = maybeProperty.get_int32();
+                }
             }
         }
 
@@ -455,6 +480,13 @@ namespace DriveFS{
 
         bsoncxx::builder::stream::document doc;
         doc << "name" << m_name ;
+        doc << "modifiedTime" << getRFC3339StringFromTime(attribute.st_mtim);
+        doc << "appProperties"
+            << open_document
+            << APP_MODE << (int) attribute.st_mode
+            << APP_UID  << (int) attribute.st_uid
+            << APP_GID  << (int) attribute.st_gid
+            << close_document;
         return doc.extract();
     }
 

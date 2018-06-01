@@ -204,8 +204,16 @@ int main(int argc, char **argv) {
         fuse_args.push_back("-o");
         fuse_args.push_back("max_readahead=1048576"); // 1MB
     }
-#endif
 
+    fuse_args.push_back("-o");
+    fuse_args.push_back("noautocache");
+
+    fuse_args.push_back("-o");
+    fuse_args.push_back("splice_write");
+#else
+    fuse_args.push_back("-o");
+    fuse_args.push_back("auto_unmount");
+#endif
     auto s_mountpoint = vm["mount"].as<std::string>();
     fuse_args.push_back(s_mountpoint.c_str());
 

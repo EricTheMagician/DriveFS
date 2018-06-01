@@ -10,6 +10,7 @@
 #include <easylogging++.h>
 #include <algorithm>
 #include <linux/fs.h>
+
 namespace DriveFS{
 
 
@@ -118,7 +119,7 @@ namespace DriveFS{
         file->m_event.signal();
         if(file->getIsUploaded()){
             auto account = getAccount(req);
-            const bool status = account->updateObjectProperties(file->getId(), bsoncxx::to_json(file->to_bson()));
+            const bool status = account->updateObjectProperties(file->getId(), bsoncxx::to_json(file->to_rename_bson()));
             if(!status){
                 fuse_reply_err(req, EIO);
                 return;
@@ -156,7 +157,7 @@ namespace DriveFS{
     }
 
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
-        auto account = getAccount(req);
+        auto *account = getAccount(req);
         GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
         parent->m_event.wait();
         bool signaled = false;
@@ -171,9 +172,18 @@ namespace DriveFS{
 
                 if (child->getIsUploaded()) {
                     account->removeChildFromParent(child, parent);
+                    child->trash();
+                }else{
+                    account->upsertFileToDatabase(child);
                 }
 
-                child->trash();
+#if FUSE_USE_VERSION >= 30
+                fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
+#else
+                fuse_lowlevel_notify_inval_inode(this->fuse_channel, parent_ino, 0, 0);
+#endif
+
+
                 child->m_event.signal();
                 break;
             }
@@ -229,7 +239,7 @@ namespace DriveFS{
         GDriveObject newParent;
 #ifdef USE_FUSE3
         if(flags & RENAME_EXCHANGE){
-            LOG(ERROR) << "Renaming: cannot attomically rename files";
+            LOG(ERROR) << "Renaming: cannot atomically rename files";
             fuse_reply_err(req, EINVAL);
             return;
         }
@@ -243,11 +253,12 @@ namespace DriveFS{
                     fuse_reply_err(req, EEXIST);
                     return;
                 }else{
-#endif
                     LOG(INFO) << "Renaming: removing preexisting file ("<< name<<") from parent " << parent->getName();
                     oldChild->trash();
-#ifdef USE_FUSE3
                 }
+#else
+                oldChild->trash();
+
 #endif
             }
             LOG(INFO) << "Renaming: Mving file ("<< name<<") from " << parent->getName() << " to " << newParent->getName();
@@ -259,6 +270,8 @@ namespace DriveFS{
             LOG(INFO) << "Renaming: file from ("<< name<<") to " << newname;
             child->setName(newname);
         }
+        Account *account = getAccount(req);
+        account->upsertFileToDatabase(child);
 
         if(child->getIsUploaded()){
             auto account = getAccount(req);
@@ -278,11 +291,10 @@ namespace DriveFS{
                 return;
             }
         }else{
-            Account *account = getAccount(req);
+//            FileIO
             account->upsertFileToDatabase(child);
         }
 
-        Account *account = getAccount(req);
 #if FUSE_USE_VERSION >= 30
         fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
         fuse_lowlevel_notify_inval_inode(account->fuse_session, child->attribute.st_ino, 0, 0);
@@ -311,7 +323,7 @@ namespace DriveFS{
                 return;
             }
 
-            FileIO *io = new FileIO(object, fi->flags, getAccount(req));
+            FileIO *io = new FileIO(object, fi->flags);
             fi->fh = (uintptr_t) io;
 
             fuse_reply_open(req, fi);
@@ -463,16 +475,17 @@ namespace DriveFS{
                 fuse_reply_err(req, EIO);
                 return;
             }
-            fuse_reply_err(req, 0);
             fi->fh = 0;
+            fuse_reply_err(req, 0);
             io->release();
 
             if(io->b_needs_uploading){
                 //sleep for 3 seconds to make sure that the filesystem has not decided to delete the file.
                 fi->fh = 0;
                 auto file = getObjectFromInodeAndReq(req, ino);
-                io->upload(true);
-
+                if(file) {
+                    io->upload(true);
+                }
             }else{
                 delete io;
                 fi->fh = 0;
@@ -642,7 +655,7 @@ namespace DriveFS{
         LOG(INFO) << "Creating file with name " << name << " and parent Id " << parent->getId();
 
         GDriveObject child = account->createNewChild(parent, name, mode, true);
-        FileIO *io = new FileIO(child, fi->flags, account);
+        FileIO *io = new FileIO(child, fi->flags);
         fi->fh = (uintptr_t) io;
         struct fuse_entry_param e;
 
@@ -682,13 +695,13 @@ namespace DriveFS{
 
 
 //        fuse_buf_copy(&dst, bufv, FUSE_BUF_SPLICE_NONBLOCK);
-        ssize_t res = fuse_buf_copy(&dst, bufv, (fuse_buf_copy_flags) 0);
+        ssize_t res = fuse_buf_copy(&dst, bufv, (fuse_buf_copy_flags) (FUSE_BUF_SPLICE_NONBLOCK | FUSE_BUF_SPLICE_MOVE));
         if (res < 0)
             fuse_reply_err(req, -res);
         else {
-            fuse_reply_write(req, (size_t) res);
             auto temp = off + res;
             io->m_file->attribute.st_size = temp > io->m_file->attribute.st_size ? temp : io->m_file->attribute.st_size;
+            fuse_reply_write(req, (size_t) res);
 
         }
 
@@ -718,6 +731,15 @@ namespace DriveFS{
     }
     void init(void *userdata, struct fuse_conn_info *conn){
         LOG(TRACE) << "Initializing fuse filesystem";
+//        conn->max_read = FileIO::block_download_size*2-1;
+//        conn->max_write = 0;
+
+        if(std::thread::hardware_concurrency() >= 4) {
+            // 4 was a somewhat arbitrary number, but it seemed like libfuse would create and destroy 4 threads very quickly.
+            // this is terrible for systems with a smaller of cores such as VPS
+//            conn->want = FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE | FUSE_CAP_WRITEBACK_CACHE | FUSE_CAP_ASYNC_DIO |
+//                         FUSE_CAP_ASYNC_READ | FUSE_CAP_PARALLEL_DIROPS;
+        }
     }
 
 

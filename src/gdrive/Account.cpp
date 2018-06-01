@@ -33,6 +33,8 @@ namespace DriveFS {
             "http://localhost:7878",
             GDRIVE_OAUTH_SCOPE),
                                                  m_id_buffer(10) {
+        FileIO::setAccount(this);
+
 
         upsert.upsert(true);
         find_and_upsert.upsert(true);
@@ -410,9 +412,6 @@ namespace DriveFS {
         mongocxx::pool::entry conn = pool.acquire();
         mongocxx::database client = conn->database(std::string(DATABASENAME));
         mongocxx::collection db = client[std::string(DATABASEDATA)];
-        mongocxx::options::index index_options;
-        index_options.unique(true);
-        db.create_index(document{} << "index" << 1 << finalize, index_options);
         //find root
 
         auto maybeRoot = db.find_one(document{} << "name" << "My Drive"
@@ -441,13 +440,20 @@ namespace DriveFS {
 
             if (!object->getIsFolder() && !object->getIsUploaded()) {
 
-                FileIO *io = new FileIO(object, 0, this);
+                FileIO *io = new FileIO(object, 0);
                 if (io->validateCachedFileForUpload(true)) {
+                    auto p = doc["parents"].get_array().value;
+                    if(p.empty() ){
+                        continue;
+                    }
+
                     auto ele = doc["uploadUrl"];
                     if (ele) {
                         std::string url = ele.get_utf8().value.to_string();
-                            io->resumeFileUploadFromUrl(url, true);
+                        LOG(INFO) << "Adding to queue upload of file with name " << object->getName() << " and id " << object->getId();
+                        io->resumeFileUploadFromUrl(url, true);
                     } else {
+                        LOG(INFO) << "Adding to queue upload of file with name " << object->getName() << " and id " << object->getId();
                         io->upload(true);
                     }
                 } else {
@@ -884,6 +890,7 @@ namespace DriveFS {
         parent->addChild(o);
         o->addParent(parent);
 
+        assert(o->parents.size()==1);
         return o;
     }
 
@@ -899,7 +906,10 @@ namespace DriveFS {
                 return true;
             }
         } else {
-            //TODO actually remove from parents
+            std::string toRemove = "[\"";
+            toRemove += parent->getId();
+            toRemove += "\"]";
+            updateObjectProperties(child->getId(), "{}", "", toRemove);
             child->removeParent(parent);
 
         }
@@ -940,16 +950,53 @@ namespace DriveFS {
             mongocxx::pool::entry conn = pool.acquire();
             mongocxx::database client = conn->database(std::string(DATABASENAME));
             mongocxx::collection data = client[std::string(DATABASEDATA)];
+            auto count = data.count(document{} << "id" << file->getId() << finalize);
+            file->m_event.wait();
             try {
-                auto count = data.count(document{} << "id" << file->getId() << finalize);
-                auto status = data.update_one(
-                        document{} << "id" << file->getId() << finalize,
-                        document{} << "$set" << open_document << concatenate(file->to_bson(count == 0)) << close_document
-                                   << finalize,
-                        upsert);
+
+                if( count == 0) {
+                    auto status = data.insert_one(
+//                            document{} << "id" << file->getId() << finalize,
+                            document{} << concatenate(file->to_bson(true))
+                                       << finalize
+                            //,find_and_upsert
+                    );
+                }else{
+                    auto status = data.update_one(
+                            document{} << "id" << file->getId() << finalize,
+                            document{} << "$set" << open_document << concatenate(file->to_bson(false))
+                                       << close_document
+                                       << finalize
+                            //,find_and_upsert
+                    );
+
+                }
             } catch (std::exception &e) {
-                LOG(ERROR) << e.what();
+                try{
+                    auto status = data.update_one(
+                            document{} << "id" << file->getId() << finalize,
+                            document{} << "$set" << open_document << concatenate(file->to_bson(false))
+                                       << close_document
+                                       << finalize
+                            //,find_and_upsert
+                    );
+                }catch(std::exception &e){
+                    LOG(ERROR) << e.what() <<"\ncount was: " << count;
+                    LOG(INFO) << "\n"
+                              << "db." << DATABASEDATA << ".update({ id: \"" << file->getId() << "\"},"
+                              << "{ $set:  " << bsoncxx::to_json(file->to_bson(true)) << "})";
+//                auto status = data.update_one(
+//                        document{} << "id" << file->getId() << finalize,
+//                        document{} << "$set" << open_document << concatenate(file->to_bson(false)) << close_document
+//                                   << finalize,
+//                        upsert
+//                );
+
+                }
+
+
             }
+            file->m_event.signal();
         }
     }
 
@@ -969,18 +1016,25 @@ namespace DriveFS {
         headers.add("X-Upload-Content-Type", mimeType);
 
         bsoncxx::builder::stream::array parents;
+        bool atLeastOneParent = false;
         for (auto parent: file->parents) {
             parents << parent->getId();
+            atLeastOneParent = true;
         }
+        assert(atLeastOneParent);
         bsoncxx::builder::stream::document doc;
 
         doc << "id" << file->getId()
             << "createdTime" << file->getCreatedTimeAsString()
             << "name" << file->getName()
-            << "parents" << parents;
+            << "parents" << parents.extract();
+
+
 
 
         auto body = bsoncxx::to_json(doc.extract());
+        VLOG(9) << "Body for getting upload url";
+        VLOG(9) << body;
         req.set_body(body, "application/json");
 //        json::value body;
 //        body["id"] = file->getId();
@@ -1078,7 +1132,7 @@ namespace DriveFS {
             }else if(status_code == 40900){
 //                LOG(ERROR)
             } else {
-                LOG(ERROR) << "Failed to upload, a file already exissts: " << resp.reason_phrase();
+                LOG(ERROR) << "Failed to upload, a file already exists: " << resp.reason_phrase();
                 LOG(ERROR) << resp.extract_utf8string(true).get();
                 return false;
             }
@@ -1122,7 +1176,7 @@ namespace DriveFS {
         }
 
         if (status_code >= 400) {
-            LOG(ERROR) << "Failed to get start point: " << response.reason_phrase();
+            LOG(ERROR) << "Failed to get start point: " << response.reason_phrase() << " for url " << url;
             LOG(ERROR) << response.extract_utf8string(true).get();
 //            LOG(ERROR) << response.headers()[""]
             unsigned int sleep_time = std::pow(2, backoff);

@@ -115,6 +115,8 @@ namespace DriveFS {
         int m_fd=-1;
         FILE* m_fp;
 
+        static bool renameOldCacheFile(const char* oldName, const char* newName);
+
     private:
         static Account* m_account;
 
