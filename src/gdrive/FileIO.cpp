@@ -28,7 +28,7 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
 
 }
 
-static boost::asio::thread_pool *DownloadPool;
+static boost::asio::thread_pool *DownloadPool, *ReadPool;
 static boost::asio::thread_pool *UploadPool;
 
 namespace DriveFS{
@@ -413,30 +413,36 @@ namespace DriveFS{
                     path /= "download";
                     path /= cacheName2;
 
+                    if(fs::exists(path)) {
+                        boost::asio::defer(*ReadPool,
+                                           [io = this, start, chunkSize, path, weak_obj = std::weak_ptr(cache)]() -> void {
+                                               auto strong_obj = weak_obj.lock();
 
-                    boost::asio::defer(*DownloadPool,
-                      [io=this, start, chunkSize, path, weak_obj = std::weak_ptr(cache)]()->void
-                      {
-                          auto strong_obj = weak_obj.lock();
+                                               if (strong_obj) {
 
-                          if(strong_obj) {
-                              if(fs::exists(path)){
-                                  FILE *fp = fopen(path.string().c_str(), "rb");
-                                  if(fp != nullptr){
-                                      auto fsize = fs::file_size(path);
-                                      auto buf = new std::vector<unsigned char>(fsize);
-                                      fread(buf->data(), sizeof(unsigned char), buf->size(), fp);
-                                      fclose(fp);
-                                      strong_obj->buffer = buf;
-                                      std::atomic_thread_fence(std::memory_order_acquire);
-                                      strong_obj->event.signal();
-                                      return;
-                                  }
-                              }else {
-                                  io->download(strong_obj, strong_obj->name, start, start + chunkSize - 1, 0);
-                              }
-                          }
-                      });
+                                                   FILE *fp = fopen(path.string().c_str(), "rb");
+                                                   if (fp != nullptr) {
+                                                       auto fsize = fs::file_size(path);
+                                                       auto buf = new std::vector<unsigned char>(fsize);
+                                                       fread(buf->data(), sizeof(unsigned char), buf->size(), fp);
+                                                       fclose(fp);
+                                                       strong_obj->buffer = buf;
+                                                       std::atomic_thread_fence(std::memory_order_acquire);
+                                                       strong_obj->event.signal();
+                                                       return;
+                                                   }
+                                               }
+                                           });
+                    } else {
+                            boost::asio::defer(*DownloadPool,
+                               [io = this, start, chunkSize, path, weak_obj = std::weak_ptr(cache)]() -> void {
+                                   auto strong_obj = weak_obj.lock();
+
+                                   if (strong_obj) {
+                                       io->download(strong_obj, strong_obj->name, start, start + chunkSize - 1, 0);
+                                   }
+                               });
+                        }
                 }
             }
             m_file->m_event.signal();
@@ -526,6 +532,9 @@ namespace DriveFS{
 
     bool FileIO::checkFileExists(){
         // make sure that the file is still valid and not deleted before uploading
+        if(m_file->getIsTrashed()){
+            return false;
+        }
         const auto cursor = DriveFS::_Object::inodeToObject.find(m_file->getInode());
 
         const bool temp = cursor == DriveFS::_Object::inodeToObject.cend();
@@ -801,8 +810,10 @@ namespace DriveFS{
     void setMaxConcurrentDownload(int n){
         if(n > 0) {
             DownloadPool = new boost::asio::thread_pool(n);
+            ReadPool = new boost::asio::thread_pool(n);
         }else{
             DownloadPool = new boost::asio::thread_pool(std::thread::hardware_concurrency());
+            ReadPool = DownloadPool = new boost::asio::thread_pool(std::thread::hardware_concurrency());
         }
     }
     void setMaxConcurrentUpload(int n){
