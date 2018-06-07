@@ -116,13 +116,14 @@ namespace DriveFS {
         FILE* m_fp;
 
         static bool renameOldCacheFile(const char* oldName, const char* newName);
+        static void deleteFileFromUploadCache(const std::string &id);
 
     private:
         static Account* m_account;
 
         void _upload();
         bool checkFileExists();
-        void download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
+        static void download(GDriveObject file, DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
         bool resumeFileUploadFromUrl(std::string url);
         void move_files_to_download_after_finish_uploading();
         void clearFileFromCache();

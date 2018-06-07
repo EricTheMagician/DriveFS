@@ -36,11 +36,14 @@ namespace DriveFS{
 //        SFAsync([=] {
             GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
             if(!parent){
-                fuse_reply_err(req, ENOENT);
+                int reply_err = fuse_reply_err(req, ENOENT);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, ENOENT);
+                }
                 return;
             }
             for (auto child: parent->children) {
-                if (child->getName() == name) {
+                if (child->getName() == name && !(child->getIsTrashed())) {
                     struct fuse_entry_param e;
                     memset(&e, 0, sizeof(e));
                     e.attr = child->attribute;
@@ -49,11 +52,17 @@ namespace DriveFS{
                     e.entry_timeout = 18000.0;
                     e.generation = 1;
                     child->lookupCount.fetch_add(1, std::memory_order_relaxed);
-                    fuse_reply_entry(req, &e);
+                    int reply_err = fuse_reply_entry(req, &e);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_entry(req, &e);
+                    }
                     return;
                 }
             }
-            fuse_reply_err(req, ENOENT);
+            int reply_err = fuse_reply_err(req, ENOENT);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, ENOENT);
+            }
 //        });
     }
 
@@ -69,16 +78,25 @@ namespace DriveFS{
     void getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
             GDriveObject object(getObjectFromInodeAndReq(req, ino));
             if (object) {
-                fuse_reply_attr(req, &(object->attribute), 180.0);
+                int reply_err = fuse_reply_attr(req, &(object->attribute), 180.0);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_attr(req, &(object->attribute), 180.0);
+                }
                 return;
             }
-            fuse_reply_err(req, ENOENT);
+            int reply_err = fuse_reply_err(req, ENOENT);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, ENOENT);
+            }
     }
 
     void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi){
         auto file = getObjectFromInodeAndReq(req, ino);
         if(!file){
-            fuse_reply_err(req, ENOENT);
+            int reply_err = fuse_reply_err(req, ENOENT);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, ENOENT);
+            }
             return;
         }
         file->m_event.wait();
@@ -87,7 +105,10 @@ namespace DriveFS{
             file->m_event.signal();
             LOG(ERROR) << "Attempted to set size to file with name " << file->getName() << " and id " << file->getId();
             LOG(ERROR) << "Settingg the file size is currently not supported";
-            fuse_reply_err(req, EIO);
+            int reply_err = fuse_reply_err(req, EIO);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, EIO);
+            }
 
             return;
         }
@@ -121,12 +142,18 @@ namespace DriveFS{
             auto account = getAccount(req);
             const bool status = account->updateObjectProperties(file->getId(), bsoncxx::to_json(file->to_rename_bson()));
             if(!status){
-                fuse_reply_err(req, EIO);
+                int reply_err = fuse_reply_err(req, EIO);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, EIO);
+                }
                 return;
             }
         }
 
-        fuse_reply_attr(req, &(file->attribute), 18000.0);
+        int reply_err = fuse_reply_attr(req, &(file->attribute), 18000.0);
+        while(reply_err != 0){
+            reply_err = fuse_reply_attr(req, &(file->attribute), 18000.0);
+        }
 
     }
 
@@ -139,7 +166,10 @@ namespace DriveFS{
         GDriveObject child = parent->findChildByName(name);
         if (child) {
             LOG(INFO) << "Mkdir with name " << name << " already existed";
-            fuse_reply_err(req, EEXIST);
+            int reply_err = fuse_reply_err(req, EEXIST);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, EEXIST);
+            }
             return;
         }
 
@@ -153,7 +183,10 @@ namespace DriveFS{
         e.entry_timeout = 18000.0;
         folder->lookupCount.fetch_add(1, std::memory_order_relaxed);
         LOG(INFO) << "Mkdir with name " << name;
-        fuse_reply_entry(req, &e);
+        int reply_err = fuse_reply_entry(req, &e);
+        while(reply_err != 0){
+            reply_err = fuse_reply_entry(req, &e);
+        }
     }
 
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
@@ -176,8 +209,9 @@ namespace DriveFS{
                     child->m_event.signal();
                 }else{
                     child->trash();
+                    parent->removeChild(child);
+                    child->removeParent(parent);
                     account->upsertFileToDatabase(child);
-
                 }
 
 #if FUSE_USE_VERSION >= 30
@@ -193,9 +227,15 @@ namespace DriveFS{
 
         if (!signaled) {
             parent->m_event.signal();
-            fuse_reply_err(req, ENOENT);
+            int reply_err = fuse_reply_err(req, ENOENT);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, ENOENT);
+            }
         } else {
-            fuse_reply_err(req, 0);
+            int reply_err = fuse_reply_err(req, 0);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, 0);
+            }
         }
 
     }
@@ -209,20 +249,32 @@ namespace DriveFS{
 
                 if (!child->children.empty()) {
                     child->m_event.signal();
-                    fuse_reply_err(req, ENOTEMPTY);
+                    int reply_err = fuse_reply_err(req, ENOTEMPTY);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_err(req, ENOTEMPTY);
+                    }
                 } else {
                     auto account = getAccount(req);
                     if (account->removeChildFromParent(child, parent)) {
-                        fuse_reply_err(req, 0);
+                        int reply_err = fuse_reply_err(req, 0);
+                        while(reply_err != 0){
+                            reply_err = fuse_reply_err(req, 0);
+                        }
                     } else {
-                        fuse_reply_err(req, EIO);
+                        int reply_err = fuse_reply_err(req, EIO);
+                        while(reply_err != 0){
+                            reply_err = fuse_reply_err(req, EIO);
+                        }
                     }
                     child->m_event.signal();
                 }
 
 
             } else {
-                fuse_reply_err(req, ENOENT);
+                int reply_err = fuse_reply_err(req, ENOENT);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, ENOENT);
+                }
             }
 //        });
     }
@@ -242,7 +294,10 @@ namespace DriveFS{
 #ifdef USE_FUSE3
         if(flags & RENAME_EXCHANGE){
             LOG(ERROR) << "Renaming: cannot atomically rename files";
-            fuse_reply_err(req, EINVAL);
+            int reply_err = fuse_reply_err(req, EINVAL);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, EINVAL);
+            }
             return;
         }
 #endif
@@ -252,7 +307,10 @@ namespace DriveFS{
             if(oldChild){
 #ifdef USE_FUSE3
                 if(RENAME_NOREPLACE & flags){
-                    fuse_reply_err(req, EEXIST);
+                    int reply_err = fuse_reply_err(req, EEXIST);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_err(req, EEXIST);
+                    }
                     return;
                 }else{
                     LOG(INFO) << "Renaming: removing preexisting file ("<< name<<") from parent " << parent->getName();
@@ -289,7 +347,10 @@ namespace DriveFS{
                                                                     bsoncxx::to_json(child->to_rename_bson()));
             }
             if(!status){
-                fuse_reply_err(req, EIO);
+                int reply_err = fuse_reply_err(req, EIO);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, EIO);
+                }
                 return;
             }
         }else{
@@ -311,7 +372,10 @@ namespace DriveFS{
 
 #endif
 
-        fuse_reply_err(req, 0);
+        int reply_err = fuse_reply_err(req, 0);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, 0);
+        }
 
     }
 
@@ -320,51 +384,85 @@ namespace DriveFS{
     void open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
         try{
             GDriveObject object = getObjectFromInodeAndReq(req, ino);
+            if(!object || object->getIsTrashed()){
+                int reply_err = fuse_reply_err(req, ENOENT);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, ENOENT);
+                }
+                return;
+            }
             if (object->getIsFolder()) {
-                fuse_reply_err(req, EISDIR);
+                int reply_err = fuse_reply_err(req, EISDIR);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, EISDIR);
+                }
                 return;
             }
 
             FileIO *io = new FileIO(object, fi->flags);
             fi->fh = (uintptr_t) io;
 
-            fuse_reply_open(req, fi);
+            int reply_err = fuse_reply_open(req, fi);
+            while(reply_err != 0){
+                reply_err = fuse_reply_open(req, fi);
+            }
             return;
         }catch(std::exception &e){
-            LOG(ERROR) << e.what();
-            fuse_reply_err(req, errno);
+            LOG(ERROR) << "Opening file" << e.what();
+            int reply_err = fuse_reply_err(req, errno);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, errno);
+            }
         }
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
-            FileIO * io = (FileIO *) fi->fh;
-            if(io == nullptr){
+        try {
+            FileIO *io = (FileIO *) fi->fh;
+            if (io == nullptr) {
                 LOG(ERROR) << "io was null when reading file";
-                fuse_reply_err(req, EIO);
+                int reply_err = fuse_reply_err(req, EIO);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, EIO);
+                }
                 return;
             }
 
-        VLOG(10) << "Reading size " << size << " with off " << off << " and " <<  ((size + off <= io->m_file->getFileSize()) ? "<=" : ">");
-        if( (size + off) > io->m_file->getFileSize() ){
-            size = io->m_file->getFileSize() - off;
-            VLOG(10) << "adjusting size to " << size << " and file size "<< io->m_file->getFileSize();
+            VLOG(10) << "Reading size " << size << " with off " << off << " and "
+                     << ((size + off <= io->m_file->getFileSize()) ? "<=" : ">");
+            if ((size + off) > io->m_file->getFileSize()) {
+                size = io->m_file->getFileSize() - off;
+                VLOG(10) << "adjusting size to " << size << " and file size " << io->m_file->getFileSize();
+            }
+
+            auto buf = io->read(size, off);
+            auto outsize = buf->size();
+
+            if (outsize != size) {
+                LOG(TRACE) << "buffer size was not the same as expected: " << outsize << " vs " << size;
+            }
+
+            int reply_err = fuse_reply_buf(req, (const char *) buf->data(), outsize);
+            while(reply_err != 0){
+                reply_err = fuse_reply_buf(req, (const char *) buf->data(), outsize);
+            }
+            delete buf;
+        }catch(std::exception &e){
+            LOG(ERROR) << "Reading file" << e.what();
+            int reply_err = fuse_reply_err(req, errno);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, errno);
+            }
         }
-
-        auto buf = io->read(size, off);
-        auto outsize = buf->size();
-
-        if(outsize != size){
-            LOG(TRACE) << "buffer size was not the same as expected: " << outsize << " vs " << size;
-        }
-
-        fuse_reply_buf(req, (const char *) buf->data(), outsize);
-        delete buf;
     }
 
     void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi){
         GDriveObject object = getObjectFromInodeAndReq(req, ino);
         if(object == nullptr){
-            fuse_reply_err(req, ENOENT);
+            int reply_err = fuse_reply_err(req, ENOENT);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, ENOENT);
+            }
             return;
         }
 
@@ -372,7 +470,10 @@ namespace DriveFS{
         FileIO *io = (FileIO *) fi->fh;
 
        if(!(io->m_file)){
-            fuse_reply_err(req, EAGAIN);
+            int reply_err = fuse_reply_err(req, EAGAIN);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, EAGAIN);
+            }
             return;
         }
 
@@ -459,7 +560,10 @@ namespace DriveFS{
 //            io->last_write_to_buffer += size;
 //            *fsize = io->last_write_to_buffer;
 //        }
-        fuse_reply_write(req, size);
+        int reply_err = fuse_reply_write(req, size);
+        while(reply_err != 0){
+            reply_err = fuse_reply_write(req, size);
+        }
 
 //    });
 
@@ -468,17 +572,28 @@ namespace DriveFS{
 
     void flush(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
         //TODO: implement flush on io
-        fuse_reply_err(req, 0);
+        int reply_err = fuse_reply_err(req, 0);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, 0);
+        }
     }
 
     void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
             FileIO *io = (FileIO *) fi->fh;
             if(io == nullptr){
-                fuse_reply_err(req, EIO);
+                int reply_err = fuse_reply_err(req, EIO);
+                while(reply_err != 0){
+                    LOG(ERROR) << "Threre was an error replying";
+                    reply_err = fuse_reply_err(req, EIO);
+                }
                 return;
             }
             fi->fh = 0;
-            fuse_reply_err(req, 0);
+            int reply_err = fuse_reply_err(req, 0);
+            while(reply_err != 0){
+                LOG(ERROR) << "Threre was an error replying";
+                reply_err = fuse_reply_err(req, 0);
+            }
             io->release();
 
             if(io->b_needs_uploading){
@@ -501,7 +616,10 @@ namespace DriveFS{
     void opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
             GDriveObject object = getObjectFromInodeAndReq(req, ino);
             if(! object->getIsFolder()){
-                fuse_reply_err(req, ENOTDIR);
+                int reply_err = fuse_reply_err(req, ENOTDIR);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, ENOTDIR);
+                }
                 return;
             }
             FolderIO *io = new FolderIO(req, object->children.size());
@@ -512,7 +630,10 @@ namespace DriveFS{
             fi->fh = (uintptr_t) io;
 
 
-            fuse_reply_open(req, fi);
+            int reply_err = fuse_reply_open(req, fi);
+            while(reply_err != 0){
+                reply_err = fuse_reply_open(req, fi);
+            }
     }
 
     void readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
@@ -520,14 +641,20 @@ namespace DriveFS{
         if(io!= nullptr) {
             reply_buf_limited(req, io->buffer->data(), io->accumulated_size,off,size);
         }else{
-            fuse_reply_err(req, EIO);
+            int reply_err = fuse_reply_err(req, EIO);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, EIO);
+            }
         }
     }
 
     void releasedir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
         FolderIO *io = (FolderIO *) fi->fh;
         delete io;
-        fuse_reply_err(req, 0);
+        int reply_err = fuse_reply_err(req, 0);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, 0);
+        }
     }
 
     void fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
@@ -545,11 +672,17 @@ namespace DriveFS{
             .f_fsid=  1000000,
             .f_flag=  0,
         };
-        fuse_reply_statfs(req, &stat);
+        int reply_err = fuse_reply_statfs(req, &stat);
+        while(reply_err != 0){
+            reply_err = fuse_reply_statfs(req, &stat);
+        }
     }
 
     void setxattr(fuse_req_t req, fuse_ino_t ino, const char *name, const char *value, size_t size, int flags){
-        fuse_reply_err(req, ENOENT);
+        int reply_err = fuse_reply_err(req, ENOENT);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, ENOENT);
+        }
     }
 
     void getxattr(fuse_req_t req, fuse_ino_t ino, const char *name, size_t size){
@@ -571,19 +704,34 @@ namespace DriveFS{
 
             if(value.empty()){
                 if(size == 0) {
-                    fuse_reply_xattr(req, 0);
+                    int reply_err = fuse_reply_xattr(req, 0);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_xattr(req, 0);
+                    }
                 }else{
-                    fuse_reply_err(req, 0);
+                    int reply_err = fuse_reply_err(req, 0);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_err(req, 0);
+                    }
                 }
             }else if(size >= value.size()+1){
-                fuse_reply_buf(req, value.c_str(), value.size());
+                int reply_err = fuse_reply_buf(req, value.c_str(), value.size());
+                while(reply_err != 0){
+                    reply_err = fuse_reply_buf(req, value.c_str(), value.size());
+                }
             }else{
-                fuse_reply_xattr(req, value.size()+1);
+                int reply_err = fuse_reply_xattr(req, value.size()+1);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_xattr(req, value.size()+1);
+                }
             }
             return;
 
         }
-        fuse_reply_err(req, ENOENT);
+        int reply_err = fuse_reply_err(req, ENOENT);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, ENOENT);
+        }
     }
 
     void listxattr(fuse_req_t req, fuse_ino_t ino, size_t size){
@@ -594,14 +742,26 @@ namespace DriveFS{
                 constexpr int needednumberofBytes = 3;
                 if(size >= needednumberofBytes) {
                     char buf[needednumberofBytes] = "id";
-                    fuse_reply_buf(req, buf, needednumberofBytes);
+                    int reply_err = fuse_reply_buf(req, buf, needednumberofBytes);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_buf(req, buf, needednumberofBytes);
+                    }
                 }else if(size == 0){
-                    fuse_reply_xattr(req, needednumberofBytes);
+                    int reply_err = fuse_reply_xattr(req, needednumberofBytes);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_xattr(req, needednumberofBytes);
+                    }
                 }else {
-                    fuse_reply_err(req, ERANGE);
+                    int reply_err = fuse_reply_err(req, ERANGE);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_err(req, ERANGE);
+                    }
                 }
                 return;
-                fuse_reply_err(req, 0);
+                int reply_err = fuse_reply_err(req, 0);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, 0);
+                }
             }else{
                 //md5Checksum
                 constexpr int needednumberofBytes = 15;
@@ -610,26 +770,44 @@ namespace DriveFS{
                     memset(buf, 0, needednumberofBytes);
                     strcpy(buf, "md5Checksum"); //0-10 cha
                     strcpy(&buf[12], "id"); //12,13 char
-                    fuse_reply_buf(req, buf, needednumberofBytes);
+                    int reply_err = fuse_reply_buf(req, buf, needednumberofBytes);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_buf(req, buf, needednumberofBytes);
+                    }
                 }else if(size == 0){
-                    fuse_reply_xattr(req, needednumberofBytes);
+                    int reply_err = fuse_reply_xattr(req, needednumberofBytes);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_xattr(req, needednumberofBytes);
+                    }
                 }else{
-                    fuse_reply_err(req, ERANGE);
+                    int reply_err = fuse_reply_err(req, ERANGE);
+                    while(reply_err != 0){
+                        reply_err = fuse_reply_err(req, ERANGE);
+                    }
                 }
                 return;
             }
 
         }
 
-        fuse_reply_err(req, ENOENT);
+        int reply_err = fuse_reply_err(req, ENOENT);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, ENOENT);
+        }
     }
 
     void removexattr(fuse_req_t req, fuse_ino_t ino, const char *name){
-        fuse_reply_err(req, ENOSYS);
+        int reply_err = fuse_reply_err(req, ENOSYS);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, ENOSYS);
+        }
     }
 
     void access(fuse_req_t req, fuse_ino_t ino, int mask){
-        fuse_reply_err(req, 0);
+        int reply_err = fuse_reply_err(req, 0);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, 0);
+        }
     }
 
     void create(fuse_req_t req, fuse_ino_t parent_ino, const char *name, mode_t mode, struct fuse_file_info *fi){
@@ -637,18 +815,27 @@ namespace DriveFS{
         GDriveObject parent = getObjectFromInodeAndReq(req, parent_ino);
         if (parent) {
             if (!parent->getIsFolder()) {
-                fuse_reply_err(req, ENOTDIR);
+                int reply_err = fuse_reply_err(req, ENOTDIR);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, ENOTDIR);
+                }
                 return;
             }
         } else {
-            fuse_reply_err(req, ENOENT);
+            int reply_err = fuse_reply_err(req, ENOENT);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, ENOENT);
+            }
             return;
         }
 
         for (auto child: parent->children) {
             if (child->getName().compare(name) == 0) {
                 LOG(INFO) << "When creating file with name " << name << " parentId " << parent->getId() << " already existed";
-                fuse_reply_err(req, EEXIST);
+                int reply_err = fuse_reply_err(req, EEXIST);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, EEXIST);
+                }
                 return;
             }
         }
@@ -668,8 +855,19 @@ namespace DriveFS{
         e.attr = child->attribute;
         e.attr_timeout = 300;
         e.entry_timeout = 300;
+
+#if FUSE_USE_VERSION >= 30
+        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
+#else
+        fuse_lowlevel_notify_inval_inode(this->fuse_channel, parent_ino, 0, 0);
+#endif
+
+
         io->open();
-        fuse_reply_create(req, &e, fi);
+        int reply_err = fuse_reply_create(req, &e, fi);
+        while(reply_err != 0){
+            reply_err = fuse_reply_create(req, &e, fi);
+        }
 
     }
 
@@ -682,7 +880,10 @@ namespace DriveFS{
     void ioctl(fuse_req_t req, fuse_ino_t ino, int cmd, void *arg, struct fuse_file_info *fi, unsigned flags, const void *in_buf, size_t in_bufsz, size_t out_bufsz);
 
     void poll(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, struct fuse_pollhandle *ph){
-        fuse_reply_err(req, ENOSYS);
+        int reply_err = fuse_reply_err(req, ENOSYS);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, ENOSYS);
+        }
     }
 
     void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi) {
@@ -698,12 +899,18 @@ namespace DriveFS{
 
 //        fuse_buf_copy(&dst, bufv, FUSE_BUF_SPLICE_NONBLOCK);
         ssize_t res = fuse_buf_copy(&dst, bufv, (fuse_buf_copy_flags) (FUSE_BUF_SPLICE_NONBLOCK | FUSE_BUF_SPLICE_MOVE));
-        if (res < 0)
-            fuse_reply_err(req, -res);
-        else {
+        if (res < 0) {
+            int reply_err = fuse_reply_err(req, -res);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, -res);
+            }
+        } else {
             auto temp = off + res;
             io->m_file->attribute.st_size = temp > io->m_file->attribute.st_size ? temp : io->m_file->attribute.st_size;
-            fuse_reply_write(req, (size_t) res);
+            int reply_err = fuse_reply_write(req, (size_t) res);
+            while(reply_err != 0){
+                reply_err = fuse_reply_write(req, (size_t) res);
+            }
 
         }
 
@@ -722,6 +929,7 @@ namespace DriveFS{
         }
 
         fuse_reply_none(req);
+
     }
 
     void flock(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi, int op);

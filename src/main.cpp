@@ -125,7 +125,8 @@ int main(int argc, char **argv) {
     DriveFS::FileIO::setCachePath(vm["cache-location"].as<std::string>());
     DriveFS::FileIO::number_of_blocks_to_read_ahead = vm["download-chunks"].as<int>();
     DriveFS::FileIO::block_download_size = vm["cache-chunk-size"].as<size_t>();
-    DriveFS::FileIO::block_read_ahead_end = std::min(DriveFS::FileIO::block_download_size + 128 * 1024, DriveFS::FileIO::block_download_size-1) ;
+    DriveFS::FileIO::block_read_ahead_start = 1024*1024; // 1mb;
+    DriveFS::FileIO::block_read_ahead_end = 1024*1024 + 184*1024 ;
     DriveFS::FileIO::move_files_to_download_on_finish_upload = vm["move-to-download"].as<bool>();
 
     DriveFS::_Object::cache.m_block_download_size = DriveFS::FileIO::block_download_size;
@@ -157,12 +158,15 @@ int main(int argc, char **argv) {
     );
     DriveFS::FileIO::setAccount(&account);
     DriveFS::FileIO::maxCacheOnDisk = vm["cache-disk-size"].as<size_t>()*1024*1024;
-    DriveFS::FileIO::checkCacheSize();
-    LOG(INFO) << "Current size of cache is " << ( (double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 /1024.0 << " GB";
+    SFAsync( [&account]() {
+        DriveFS::FileIO::checkCacheSize();
+        LOG(INFO) << "Current size of cache is "
+                  << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
 
-    if(account.needToInitialize()) {
-        account.run();
-    }
+        if (account.needToInitialize()) {
+            account.run();
+        }
+    });
 
     /****************************
      *

@@ -30,6 +30,7 @@ inline uint64_t getChunkNumber(uint64_t start, uint64_t buffer_size){
 
 static boost::asio::thread_pool *DownloadPool, *ReadPool;
 static boost::asio::thread_pool *UploadPool;
+static boost::asio::thread_pool WritePool(1);
 
 namespace DriveFS{
 
@@ -75,15 +76,21 @@ namespace DriveFS{
             delete write_buffer2;
         }
 
-        if(m_fp != nullptr){
+        if(isOpen()){
+            VLOG(9) << "Closing file " << f_name << ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
+//            LOG(TRACE) << "Closing file " << f_name << ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
             fclose(m_fp);
+            m_fp = nullptr;
         }
     }
 
     std::vector<unsigned char>* FileIO::read(const size_t &size, const off_t &off) {
         if( (! m_file->getIsUploaded()) || (b_is_cached && isOpen()) ){
-            if(!isOpen()){
+            bool once = false;
+            while(!isOpen()){
                 open();
+                LOG_IF(once, ERROR) << "There was an error opening file " << this->m_file->getId() <<". " << strerror(errno);
+                once = true;
             }
             if(isOpen()) {
                 auto buf = new std::vector<unsigned char>(size);
@@ -104,18 +111,19 @@ namespace DriveFS{
 
     }
 
-    void FileIO::download(DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
-        if(!m_file){
-            LOG(ERROR) << "While downloading a file, this->m_file was null for " << cacheName << " ("<<start <<", " << end << ")";
+    void FileIO::download(GDriveObject file, DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
+        if(!file || !cache){
+            LOG(ERROR) << "While downloading a file, file was null for " << cacheName << " ("<<start <<", " << end << ")";
             if(cache) {
                 cache->isInvalid = true;
                 cache->event.signal();
             }
             return;
         }
-        VLOG(10) << "Downloading " << m_file->getName() <<"\t" << start;
+        m_account->refresh_token();
+        VLOG(9) << "Downloading " << file->getName() <<"\t" << start;
         http_client client = m_account->getClient();
-        uri_builder builder( std::string("files/") +  m_file->getId());
+        uri_builder builder( std::string("files/") +  file->getId());
         builder.append_query("alt", "media");
 //        builder.append_query("acknowledgeAbuse", "true");
         builder.append_query("supportsTeamDrives", "true");
@@ -132,37 +140,37 @@ namespace DriveFS{
         req.set_method(methods::GET);
         req.set_request_uri(builder.to_uri());
 
-        VLOG(10) << req.headers()["Range"];
+        VLOG(9) << req.headers()["Range"];
 
         http_response resp;
         try {
             resp = client.request(req).get();
         }catch(std::exception &e){
-            LOG(ERROR) << "There was an error while trying to download chunk";
+            LOG(ERROR) << "There was an error while trying to download chunk: " << e.what();
             LOG(DEBUG) << "Chunk-range" << start << " - " << end;
-            if(m_file) {
-                LOG(DEBUG) << "File ID " << m_file->getId();
-                LOG(DEBUG) << "File Size " << m_file->getFileSize();
+            if(file) {
+                LOG(DEBUG) << "File ID " << file->getId();
+                LOG(DEBUG) << "File Size " << file->getFileSize();
             }
             LOG(DEBUG) << "Url " << builder.to_string();
             const unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
-            if (backoff <= 10) {
-                download(cache, std::move(cacheName), start, end, backoff);
-            }
+            FileIO::download(std::move(file), std::move(cache), std::move(cacheName), start, end, backoff);
             return;
 
         };
+
+        if(resp.status_code() == 404){
+            throw std::runtime_error("need to handle the case when the file has been deleted");
+        }
         if(resp.status_code() != 206 && resp.status_code() != 200){
             LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
             LOG(ERROR) << resp.extract_json(true).get();
             const unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
-            if (backoff <= 10) {
-                download(cache, std::move(cacheName), start, end, backoff + 1);
-            }
+            download(std::move(file), std::move(cache), std::move(cacheName), start, end, backoff + 1);
             return;
         }
 
@@ -171,12 +179,29 @@ namespace DriveFS{
         cache->event.signal();
 
         //write buffer to disk
-        fs::path path = cachePath / "download" / cacheName;
-        FILE *fp = fopen(path.string().c_str(), "wb");
-        if(fp != nullptr){
-            fwrite(cache->buffer->data(), sizeof(unsigned char), cache->buffer->size(), fp);
-            fclose(fp);
-        }
+        boost::asio::defer(WritePool,
+                           [cacheName, weak_obj = std::weak_ptr(cache)]() -> void {
+                               auto strong_cache = weak_obj.lock();
+                               if (strong_cache && !(strong_cache->isInvalid)) {
+                                   fs::path path = cachePath / "download" / cacheName;
+                                   FILE *fp = fopen(path.string().c_str(), "wb");
+                                   if (fp != nullptr) {
+                                       fwrite(strong_cache->buffer->data(), sizeof(unsigned char), strong_cache->buffer->size(), fp);
+                                       fclose(fp);
+                                   }
+                                   fs::permissions(path, fs::owner_all);
+                               }
+                           });
+
+//        fs::path path = cachePath / "download" / cacheName;
+//        FILE *fp = fopen(path.string().c_str(), "wb");
+//        if (fp != nullptr) {
+//            fwrite(cache->buffer->data(), sizeof(unsigned char), cache->buffer->size(), fp);
+//            fclose(fp);
+//        }
+//        fs::permissions(path, fs::owner_all);
+
+
 
     }
 
@@ -370,7 +395,9 @@ namespace DriveFS{
             if (sz > 0) {
                 chunksToDownload.push_back(getChunkNumber(sz-1, block_download_size));
             }
+
         }
+
         if( off2 >= FileIO::block_read_ahead_start && off2 <= FileIO::block_read_ahead_end){
             uint64_t start = chunkStart;
             start += spillOver ? 2*block_download_size : block_download_size;
@@ -413,7 +440,7 @@ namespace DriveFS{
                     path /= "download";
                     path /= cacheName2;
 
-                    if(fs::exists(path)) {
+                    if(fs::exists(path) && (fs::file_size(path) == block_download_size|| _chunkNumber == getChunkNumber(m_file->getFileSize(), block_download_size))) {
                         boost::asio::defer(*ReadPool,
                                            [io = this, start, chunkSize, path, weak_obj = std::weak_ptr(cache)]() -> void {
                                                auto strong_obj = weak_obj.lock();
@@ -427,19 +454,31 @@ namespace DriveFS{
                                                        fread(buf->data(), sizeof(unsigned char), buf->size(), fp);
                                                        fclose(fp);
                                                        strong_obj->buffer = buf;
-                                                       std::atomic_thread_fence(std::memory_order_acquire);
-                                                       strong_obj->event.signal();
-                                                       return;
+                                                   }else{
+                                                       fs::permissions(path, fs::owner_all);
+                                                        if(errno == EPERM){
+                                                           LOG(ERROR) << strerror(errno);
+                                                        }else{
+                                                            if(errno == EMFILE){
+                                                                LOG(ERROR) << "There was an error opening file " << path.string();
+                                                            }else{
+                                                                LOG(ERROR) << "There was an error opening file " << path.string() <<"\n" << strerror(errno) ;
+                                                            }
+                                                        }
+                                                       strong_obj->isInvalid = true;
                                                    }
+                                                   std::atomic_thread_fence(std::memory_order_acquire);
+                                                   strong_obj->event.signal();
                                                }
                                            });
                     } else {
                             boost::asio::defer(*DownloadPool,
-                               [io = this, start, chunkSize, path, weak_obj = std::weak_ptr(cache)]() -> void {
+                               [start, chunkSize, path, weak_file = std::weak_ptr(m_file), weak_obj = std::weak_ptr(cache)]() -> void {
                                    auto strong_obj = weak_obj.lock();
+                                   auto strong_file = weak_file.lock();
 
-                                   if (strong_obj) {
-                                       io->download(strong_obj, strong_obj->name, start, start + chunkSize - 1, 0);
+                                   if (strong_obj && strong_file) {
+                                       FileIO::download(strong_file, strong_obj, strong_obj->name, start, start + chunkSize - 1, 0);
                                    }
                                });
                         }
@@ -468,17 +507,29 @@ namespace DriveFS{
 
     void FileIO::open(){
 
+        m_event.wait();
+        if(isOpen()){
+            fclose(m_fp);
+            VLOG(9) << "Closing file " << f_name<< ".released. fd is " << m_fd<< ". This is " << (uintptr_t ) this;
+//            LOG(TRACE) << "Closing file " << f_name<< ".released. fd is " << m_fd<< ". This is " << (uintptr_t ) this;
+            m_fp = nullptr;
+            m_fd = -1;
+        }
+
         if(m_writeable){
             clearFileFromCache();
             b_is_cached = true;
             m_file->attribute.st_size = 0;
             m_fp = fopen(f_name.c_str(), "w+b");
             m_fd = fileno(m_fp);
+            VLOG(9) << "Opened file for writing: " << f_name << ". fd is " << m_fd << ". This is " << (uintptr_t ) this;
+//            LOG(TRACE) << "Opened file for writing: " << f_name << ". fd is " << m_fd << ". This is " << (uintptr_t ) this;
         }
         else if(m_readable) {
             if (m_file->getIsUploaded()) {
                 //file is not cached on the hdd
                 b_is_cached = false;
+                m_event.signal();
                 return;
             }
 
@@ -488,12 +539,15 @@ namespace DriveFS{
                 m_fp = fopen(path.c_str(), "rb");
                 if(m_fp != nullptr) {
                     m_fd = fileno(m_fp);
+                    VLOG(9) << "Opened file for reading: " << path.string() << ". fd is " << m_fd << ". This is " << (uintptr_t ) this;
+//                    LOG(TRACE) << "Opened file for reading: " << path.string() << ". fd is " << m_fd << ". This is " << (uintptr_t ) this;
                 }else{
                     LOG(ERROR) << "Error while opening cached file\n" << strerror(errno);
                 }
             }
         }
 
+        m_event.signal();
         return;
 
     }
@@ -585,7 +639,8 @@ namespace DriveFS{
                     }
                     auto start = 0;
                     int in_fd= ::open(uploadFileName.c_str(), O_RDONLY);
-
+            VLOG(9) << "Opening file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
+//                    LOG(TRACE) << "Opening file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
                     if(in_fd < 0) {
                         LOG(ERROR) << "Failed to open input file " << uploadFileName << "\nReasonm: "
                                    << strerror(errno);
@@ -637,6 +692,8 @@ namespace DriveFS{
                         }
 
                     }
+            VLOG(9) << "Closing file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
+//                    LOG(TRACE) << "Closing file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
                     close(in_fd);
 
                 } catch (std::exception &e) {
@@ -650,13 +707,20 @@ namespace DriveFS{
     }
     void FileIO::release(){
 
-        if(last_write_to_buffer >0 && isOpen()){
-            fwrite((char *) write_buffer->data(), sizeof(char), last_write_to_buffer, m_fp);
-            last_write_to_buffer = 0;
+        m_event.wait();
+        if(isOpen()){
+            if(last_write_to_buffer >0) {
+                fwrite((char *) write_buffer->data(), sizeof(char), last_write_to_buffer, m_fp);
+                last_write_to_buffer = 0;
+            }
             fclose(m_fp);
+            VLOG(9) << "Closing file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
+//            LOG(TRACE) << "Closing file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
+
             m_fp = nullptr;
             m_fd = -1;
         }
+
 
         if(b_needs_uploading){
             m_account->upsertFileToDatabase(m_file);
@@ -678,6 +742,7 @@ namespace DriveFS{
 
         }
 
+        m_event.signal();
 
 
     }
@@ -777,10 +842,11 @@ namespace DriveFS{
         memset(&st, 0, sizeof(struct stat));
 
         bool needsUpdating = false;
-
+        uint8_t count = 0;
         for(fs::directory_entry& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {})) {
 //            std::cout << entry << "\n";
             if(fs::exists(entry)) {
+                fs::permissions(entry, fs::owner_all);
                 needsUpdating = true;
                 size = fs::file_size(entry);
                 incrementCacheSize(size);
@@ -799,6 +865,13 @@ namespace DriveFS{
 
                 upsert_op.upsert(true);
                 documents.append(upsert_op);
+                count++;
+                if(count == 100){
+                    db.bulk_write(documents);
+                    count = 0;
+                    needsUpdating = false;
+                    documents = mongocxx::bulk_write();
+                }
             }
 
 
@@ -895,5 +968,19 @@ namespace DriveFS{
             // oldStatus has been updated. Retry the CAS loop.
         }
 
+    }
+
+    void FileIO::deleteFileFromUploadCache(const std::string &id) {
+        fs::path path = downloadPath;
+        path /= id;
+        if( fs::exists(path)){
+            LOG(INFO) << "Removing cached file";
+            fs::remove(path);
+        }
+
+        path += ".released";
+        if(fs::exists(path)){
+            fs::remove(path);
+        }
     }
 }

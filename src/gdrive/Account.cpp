@@ -438,7 +438,7 @@ namespace DriveFS {
 
             auto object = std::make_shared<DriveFS::_Object>(inode, doc);
 
-            if (!object->getIsFolder() && !object->getIsUploaded()) {
+            if (!(object->getIsFolder() || object->getIsUploaded() || object->getIsTrashed()) ) {
 
                 FileIO *io = new FileIO(object, 0);
                 if (io->validateCachedFileForUpload(true)) {
@@ -465,10 +465,11 @@ namespace DriveFS {
 
             }
 
-            std::string id = object->getId();
-            DriveFS::_Object::idToObject[id] = object;
-            DriveFS::_Object::inodeToObject[inode] = object;
-
+            if(!object->getIsTrashed()) {
+                std::string id = object->getId();
+                DriveFS::_Object::idToObject[id] = object;
+                DriveFS::_Object::inodeToObject[inode] = object;
+            }
 
 //            if(!object->getIsUploaded()) {
 //                namespace fs = boost::filesystem;
@@ -925,7 +926,19 @@ namespace DriveFS {
         ss << file->getId();
         uri_builder builder(ss.str());
         builder.append_query("supportsTeamDrives", "true");
-        http_response resp = client.request(methods::DEL, builder.to_string()).get();
+        http_response resp;
+        try {
+            resp = client.request(methods::DEL, builder.to_string()).get();
+        }catch(std::exception &e){
+            LOG(ERROR) << "There was an error when trying to trash a file";
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+            sleep(sleep_time);
+            if (backoff <= 10) {
+                return trash(file, backoff);
+            }
+            return false;
+        }
         if (resp.status_code() != 204) {
             if (resp.status_code() == 404) {
                 return true;
@@ -936,7 +949,7 @@ namespace DriveFS {
             unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
-            if (backoff <= 5) {
+            if (backoff <= 10) {
                 return trash(file, backoff + 1);
             }
             return false;
@@ -1044,8 +1057,19 @@ namespace DriveFS {
         req.set_request_uri(builder.to_uri());
         req.set_method(methods::POST);
 
-        auto resp = client.request(req).get();
+        http_response resp;
+
         std::string location;
+        try {
+            resp = client.request(req).get();
+        }catch(std::exception){
+            LOG(ERROR) << "There was an error with getting the upload url";
+            unsigned int sleep_time = std::pow(2, backoff);
+            LOG(INFO) << "Sleeping for " << sleep_time << " second before retrying";
+            sleep(sleep_time);
+
+            location = getUploadUrlForFile(file, mimeType, backoff + 1);
+        }
 
         if(resp.status_code() == 404){
             LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase() << "\n\t"
@@ -1105,7 +1129,8 @@ namespace DriveFS {
     Account::upload(std::string uploadUrl, std::string filePath, size_t fileSize, int64_t start, std::string mimeType) {
         refresh_token();
         try {
-            concurrency::streams::istream stream = concurrency::streams::file_stream<unsigned char>::open_istream(
+            concurrency::streams::basic_istream<unsigned char> stream = concurrency::streams::file_stream<unsigned char>::open_istream(
+//            concurrency::streams::istream stream = concurrency::streams::file_stream<unsigned char>::open_istream(
                     filePath).get();
             http_client client(uploadUrl, m_http_config);
 
@@ -1124,7 +1149,7 @@ namespace DriveFS {
 
             auto resp = client.request(req).get();
             auto status_code = resp.status_code();
-            stream.close().wait();
+            stream.close();
             if (status_code == 200 || status_code == 201) {
                 return true;
             } else if (status_code == 401) {

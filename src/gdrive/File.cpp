@@ -39,7 +39,14 @@ std::string getRFC3339StringFromTime(const struct timespec &time){
     strftime(&date[0], 100, "%FT%T", timeinfo);
 
     std::string s(date);
-    s += "." + std::to_string(time.tv_nsec) + "Z";
+    uint16_t ms = (time.tv_nsec / 1000000) % 1000; // extra safety to ensure thaat the number is between [0,999]
+    if(ms < 10){
+        s += ".00" + std::to_string(ms) + "Z";
+    }else if(ms < 100){
+        s += ".0" + std::to_string(ms) + "Z";
+    }else {
+        s += "." + std::to_string(ms) + "Z";
+    }
     return s;
 }
 
@@ -377,7 +384,7 @@ namespace DriveFS{
                     attribute.st_uid = std::strtoul(maybeProperty.get_utf8().value.to_string().c_str(), nullptr, 10);
                 }else{
                     LOG(INFO)<< "type is " << (uint8_t) maybeProperty.type();
-//                    attribute.st_uid = maybeProperty.get_int32();
+//                    attribute.st_uid = maybeProperty.get_int64();
                 }
             }
 
@@ -430,6 +437,10 @@ namespace DriveFS{
             _Object::idToObject.erase(m_id);
         }
         trashed = true;
+
+        if(!getIsUploaded()){
+            FileIO::deleteFileFromUploadCache(getId());
+        }
     }
 
     GDriveObject _Object::findChildByName(const char *name) const {
@@ -484,9 +495,9 @@ namespace DriveFS{
         doc << "modifiedTime" << getRFC3339StringFromTime(attribute.st_mtim);
         doc << "appProperties"
             << open_document
-            << APP_MODE << (int) attribute.st_mode
-            << APP_UID  << (int) attribute.st_uid
-            << APP_GID  << (int) attribute.st_gid
+            << APP_MODE << ((int) attribute.st_mode)
+            << APP_UID  << ((int) attribute.st_uid)
+            << APP_GID  << ((int) attribute.st_gid)
             << close_document;
         return doc.extract();
     }
