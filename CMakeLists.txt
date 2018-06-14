@@ -64,6 +64,7 @@ find_package(PkgConfig REQUIRED)
 pkg_search_module(LIBBSON REQUIRED libbson-1.0)
 target_include_directories(${PROJECT_NAME} PUBLIC
         ./include
+        ./external/include
         ./external
         ./external/adaptive_time_parser
         ./external/semaphore/common
@@ -85,14 +86,15 @@ find_package(Boost 1.66.0 COMPONENTS thread system program_options filesystem RE
 find_library(LIBCRYPTO libcrypto.so.1.0.0)
 find_library(LIBSSL libssl.so.1.0.0)
 
-#add_dependencies(${PROJECT_NAME} cpprest)
+include(./cmake/libcpprestsdk.cmake)
+add_dependencies(${PROJECT_NAME} cpprest)
 target_link_libraries(${PROJECT_NAME}
         ${LIBFUSE_LIBRARIES}
         pthread
         ${LIBCRYPTO}
         ${LIBSSL}
         ${Boost_LIBRARIES}
-        cpprest
+        ${CPPREST_LIB}
         mongocxx bsoncxx
         )
 
