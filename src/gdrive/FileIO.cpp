@@ -12,6 +12,7 @@
 #include <gdrive/Account.h>
 #include <mutex>
 #include <sys/sendfile.h>
+#include <atomic>
 
 static std::mutex deleteCacheMutex;
 #define DBCACHENAME "FileCacheDB"
@@ -115,7 +116,7 @@ namespace DriveFS{
         if(!file || !cache){
             LOG(ERROR) << "While downloading a file, file was null for " << cacheName << " ("<<start <<", " << end << ")";
             if(cache) {
-                cache->isInvalid = true;
+                cache->setIsInvalid();
                 cache->event.signal();
             }
             return;
@@ -188,8 +189,10 @@ namespace DriveFS{
                                    if (fp != nullptr) {
                                        fwrite(strong_cache->buffer->data(), sizeof(unsigned char), strong_cache->buffer->size(), fp);
                                        fclose(fp);
+                                       fs::permissions(path, fs::owner_all);
+                                       insertFileToCacheDatabase(path, strong_cache->buffer->size());
                                    }
-                                   fs::permissions(path, fs::owner_all);
+                                   strong_cache.reset();
                                }
                            });
 
@@ -393,7 +396,11 @@ namespace DriveFS{
         if( off == 0 ){
             auto sz = m_file->getFileSize();
             if (sz > 0) {
-                chunksToDownload.push_back(getChunkNumber(sz-1, block_download_size));
+                auto lastChunk = getChunkNumber(sz-1, block_download_size);
+                chunksToDownload.push_back(lastChunk);
+    //                if(lastChunk > 1){
+    //                    chunksToDownload.push_back(1);
+    //                }
             }
 
         }
@@ -432,6 +439,7 @@ namespace DriveFS{
                     auto chunkSize = (_chunkNumber +1)*block_download_size >= m_file->getFileSize() ?
                                      m_file->getFileSize() - _chunkNumber*block_download_size : block_download_size;
                     cache->size = chunkSize;
+                    std::atomic_thread_fence(std::memory_order_release);
                     Object::cache.insert(m_file, _chunkNumber, chunkSize, cache);
 //                    void FileIO::download(DownloadItem cache, std::string cacheName2, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
                     (*m_file->m_buffers)[_chunkNumber] = cache;
@@ -479,11 +487,21 @@ namespace DriveFS{
 
                                    if (strong_obj && strong_file) {
                                        FileIO::download(strong_file, strong_obj, strong_obj->name, start, start + chunkSize - 1, 0);
+                                       strong_file.reset();
+                                       strong_obj.reset();
+                                       return;
+                                   }
+                                   if(strong_file){
+                                       strong_file.reset();
+                                   }
+                                   if(strong_obj){
+                                       strong_obj.reset();
                                    }
                                });
                         }
                 }
             }
+            std::atomic_thread_fence(std::memory_order_release);
             m_file->m_event.signal();
 
 //        mtxDownloadInsert.unlock();
@@ -632,11 +650,16 @@ namespace DriveFS{
                 try {
                     auto sz = m_file->getFileSize();
                     auto sz_actual = fs::file_size(uploadFileName);
+                    std::vector<fs::path> paths;
+                    std::vector<size_t> sizes;
                     if(sz != sz_actual){
                         LOG(ERROR) << "file size in database is not the same as the actual fileSize";
                         LOG(TRACE) << "id: " << m_file->getId();
                         sz = sz_actual;
                     }
+                    const int nChunks = getChunkNumber(sz, block_download_size);
+                    paths.reserve(nChunks);
+                    sizes.reserve(nChunks);
                     auto start = 0;
                     int in_fd= ::open(uploadFileName.c_str(), O_RDONLY);
             VLOG(9) << "Opening file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
@@ -679,6 +702,9 @@ namespace DriveFS{
                             }
 
                             close(out_fd);
+
+                            paths.push_back(out_path);
+                            sizes.push_back(read_size);
                         }
 
 
@@ -695,7 +721,7 @@ namespace DriveFS{
             VLOG(9) << "Closing file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
 //                    LOG(TRACE) << "Closing file " << f_name<< ".released. fd is " << m_fd << ". This is " << (uintptr_t ) this;
                     close(in_fd);
-
+                    insertFilesToCacheDatabase(paths,sizes);
                 } catch (std::exception &e) {
                     LOG(ERROR) << "There was an error when trying to move the file from upload to download: "
                                << e.what();
@@ -855,12 +881,11 @@ namespace DriveFS{
 
                 mongocxx::model::update_one upsert_op(
                         document{} << "filename" << path.string() << finalize,
-                        document{} << "$set" << open_document
-                                   << "filename" << path.string()
+                        document{} << "filename" << path.string()
                                    << "size" << ((int64_t) size)
                                    << "mtime" << st.st_mtim.tv_sec
                                    << "exists" << true
-                                   << close_document << finalize
+                                   << finalize
                 );
 
                 upsert_op.upsert(true);
@@ -983,4 +1008,58 @@ namespace DriveFS{
             fs::remove(path);
         }
     }
+
+    void FileIO::insertFileToCacheDatabase(fs::path path, size_t size){
+        mongocxx::pool::entry conn = m_account->pool.acquire();
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DBCACHENAME)];
+        mongocxx::options::update option;
+        option.upsert(true);
+
+        db.update_one(
+                document{} << "filename" << path.string() << finalize,
+                document{} << "$set" << open_document << "filename" << path.string()
+                           << "size" << ((int64_t) size)
+                           << "mtime" << time(nullptr)
+                           << "exists" << true
+                           << close_document << finalize,
+                option
+
+        );
+
+        incrementCacheSize(size);
+
+    }
+    void FileIO::insertFilesToCacheDatabase(const std::vector<fs::path> &paths, const std::vector<size_t> &sizes){
+        mongocxx::pool::entry conn = m_account->pool.acquire();
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DBCACHENAME)];
+        mongocxx::options::update option;
+        option.upsert(true);
+        mongocxx::bulk_write documents;
+        size_t totalSize = 0;
+        for(int i = 0; i < paths.size(); i++) {
+            const auto & path = paths[i];
+            mongocxx::model::update_one upsert_op(
+                    document{} << "filename" << path.string() << finalize,
+                    document{} << "$set" << open_document
+                               << "filename" << path.string()
+                               << "size" << ((int64_t) sizes[i])
+                               << "mtime" << time(nullptr)
+                               << close_document  << finalize
+            );
+            upsert_op.upsert(true);
+            documents.append(upsert_op);
+            totalSize += sizes[i];
+
+        }
+
+        db.bulk_write(documents);
+
+        incrementCacheSize(totalSize);
+        LOG(INFO) << "Current size of cache is "
+                  << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
+
+    }
+
 }

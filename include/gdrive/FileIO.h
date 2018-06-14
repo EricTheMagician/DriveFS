@@ -84,6 +84,8 @@ namespace DriveFS {
 
         static void checkCacheSize();
         static int64_t incrementCacheSize(int64_t size);
+        static void insertFileToCacheDatabase(fs::path path, size_t size);
+        static void insertFilesToCacheDatabase(const std::vector<fs::path> &paths, const std::vector<size_t> &size);
         static void deleteFilesFromCacheOnDisk();
         static void setCachePath(const fs::path &path){
             FileIO::cachePath = path;

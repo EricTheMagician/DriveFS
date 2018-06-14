@@ -58,6 +58,16 @@ public:
         return this->last_access <= that.last_access;
     }
 
+    void setIsInvalid(){
+        isInvalid = true;
+        if(buffer != nullptr){
+            delete buffer;
+            buffer = nullptr;
+            size = 0;
+            std::atomic_thread_fence(std::memory_order_release);
+        }
+    }
+
 
 };
 
@@ -89,17 +99,17 @@ public:
         auto &heap_handles = *(file->heap_handles);
         heap_handles[chunkNumber]= handle;
 
-        auto newCacheSize = cacheSize.fetch_add(size, std::memory_order_release) + size;
+        auto newCacheSize = cacheSize.fetch_add(size, std::memory_order_seq_cst) + size;
         while(newCacheSize > maxCacheSize){
             auto &head = cache->top();
             auto sz = head->buffer == nullptr ? head->size : head->buffer->size();
             newCacheSize = cacheSize.fetch_sub(sz, std::memory_order_relaxed) - sz;
-            VLOG(10) << "Deleting cache item "<< head->name <<" of size " << sz;
+            VLOG(9) << "Deleting cache item "<< head->name <<" of size " << sz;
             LOG_IF(head.use_count() > 1, TRACE) << "Use count for " << head->name << " is " << head.use_count();
             cache->pop();
 
         }
-        VLOG(10) << "Inserting " << std::to_string(chunkNumber);
+        VLOG(9) << "Inserting " << std::to_string(chunkNumber);
         sema.signal();
     }
 

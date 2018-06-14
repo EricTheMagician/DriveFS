@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
     log_desc.add_options()
             ("log-location", po::value<std::string>()->default_value("/tmp/DriveFS.log"), "sets the location for the log file")
             ("log-max-size", po::value<std::string>()->default_value("104857600"),"sets the maximum log size, in bytes. default is 100M")
-            ("log-verbose,v", po::value<int>()->default_value(1)->implicit_value(9), "log verbosee. if no  value is passed, log maximum verbose. valid values: [0-9]")
+            ("log-verbose,v", po::value<int>()->implicit_value(9), "log verbosee. if no  value is passed, log maximum verbose. valid values: [0-9]")
             ;
 
     po::positional_options_description p;

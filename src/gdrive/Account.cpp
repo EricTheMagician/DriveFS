@@ -1154,8 +1154,10 @@ namespace DriveFS {
                 return true;
             } else if (status_code == 401) {
                 refresh_token();
+                return false;
             }else if(status_code == 40900){
 //                LOG(ERROR)
+                return false;
             } else {
                 LOG(ERROR) << "Failed to upload, a file already exists: " << resp.reason_phrase();
                 LOG(ERROR) << resp.extract_utf8string(true).get();
