@@ -18,6 +18,8 @@ struct compare_download_items;
 typedef std::shared_ptr< __no_collision_download__> DownloadItem;
 typedef std::weak_ptr< __no_collision_download__> WeakBuffer;
 
+static std::atomic_int64_t created(0);
+
 class __no_collision_download__{
 public:
     std::vector<unsigned char>* buffer=nullptr;
@@ -28,7 +30,19 @@ public:
     bool isInvalid=false;
     AutoResetEvent event;
 
-    __no_collision_download__(): buffer(nullptr){}
+    __no_collision_download__(): buffer(nullptr), size(0), name(""), isInvalid(false){
+////        created++;
+//        LOG(INFO) << (created++) + 1<< " collision downloads created available";
+    }
+
+//    __no_collision_download__(__no_collision_download__ &that){
+//        this->buffer = new std::vector(*that.buffer);
+//        this->size = that.size;
+//        this->name = that.name;
+//        this->last_access = that.last_access;
+//        this->isInvalid  = that.isInvalid;
+//        LOG(INFO) << (created++) + 1<< " collision downloads copied";
+//    }
     __no_collision_download__(__no_collision_download__ &&that){
         this->buffer = that.buffer;
         that.buffer = nullptr;
