@@ -509,6 +509,7 @@ namespace DriveFS{
         if(found != children.end())
             children.erase(found);
         m_event.signal();
+        return found != children.end();
     }
 
     bool _Object::removeParent(GDriveObject parent){
@@ -517,6 +518,7 @@ namespace DriveFS{
         if(found != parents.end())
             parents.erase(found);
         m_event.signal();
+        return found != parents.end();
     }
 
     std::string _Object::getCreatedTimeAsString() const{

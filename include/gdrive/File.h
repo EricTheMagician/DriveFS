@@ -51,6 +51,7 @@ namespace DriveFS {
 
         void updatLastAccessToCache(uint64_t chunkNumber);
         inline bool getIsUploaded() const{return isUploaded;}
+        inline void setIsUploaded(bool status) {isUploaded = status;}
         inline bool getIsTrashed() const {return trashed; }
         void trash();
         std::string md5() const { return md5Checksum; };

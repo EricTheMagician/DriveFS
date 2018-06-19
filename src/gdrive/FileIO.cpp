@@ -88,10 +88,11 @@ namespace DriveFS{
     std::vector<unsigned char>* FileIO::read(const size_t &size, const off_t &off) {
         if( (! m_file->getIsUploaded()) || (b_is_cached && isOpen()) ){
             bool once = false;
-            while(!isOpen()){
+            while(!isOpen() && (!m_file->getIsUploaded() || !once) ){
                 open();
                 LOG_IF(once, ERROR) << "There was an error opening file " << this->m_file->getId() <<". " << strerror(errno);
                 once = true;
+                sleep(5);
             }
             if(isOpen()) {
                 auto buf = new std::vector<unsigned char>(size);
@@ -276,7 +277,7 @@ namespace DriveFS{
         const auto fileSize = m_file->getFileSize();
         const size_t size = _size + off > fileSize ? fileSize-off-1: _size;
         const bool spillOver = chunkStart != getChunkStart(off+size, block_download_size);
-        std::string cacheName = m_file->getId() + "\t" + std::to_string(chunkStart);
+        std::string cacheName = m_file->getId() + "-" + std::to_string(chunkStart);
         std::vector<uint64_t> chunksToDownload;
         uint64_t spillOverPrecopy=0;
 
@@ -319,7 +320,6 @@ namespace DriveFS{
 //                m_file->cache.updateAccessTime(m_file, chunkNumber, item);
             }
 
-
         }else{
             item = getFromCache(path_to_buffer, chunkStart);
             if( item) {
@@ -338,9 +338,11 @@ namespace DriveFS{
                 memcpy(buffer->data(), item->buffer->data()+start, size2);
 
 
+
             }else{
                 chunksToDownload.push_back(chunkNumber);
             }
+            item.reset();
         }
 
         if(spillOver) {
@@ -352,7 +354,7 @@ namespace DriveFS{
             path_to_buffer /= "download";
             path_to_buffer /= m_file->getId() + "-" + std::to_string(chunkStart2);
 
-            cacheName = m_file->getId() + "\t" + std::to_string(chunkStart2);
+            cacheName = m_file->getId() + "-" + std::to_string(chunkStart2);
             DownloadItem item;
 
             if ( (item=m_file->m_buffers->at(chunkNumber2).lock()) ) {
@@ -387,6 +389,7 @@ namespace DriveFS{
                     chunksToDownload.push_back(chunkNumber2);
                 }
             }
+            item.reset();
 
         }
 
@@ -430,7 +433,7 @@ namespace DriveFS{
             for (auto _chunkNumber: chunksToDownload) {
                 auto start = _chunkNumber*block_download_size;
                 std::string cacheName2 = m_file->getId() + "-" + std::to_string(start);
-                DownloadItem item = m_file->m_buffers->at(_chunkNumber).lock();
+                item = m_file->m_buffers->at(_chunkNumber).lock();
                 if ( (!item) || item->isInvalid){
                     DownloadItem cache = std::make_shared<__no_collision_download__>();
                     cache->last_access = time(NULL);
@@ -501,6 +504,7 @@ namespace DriveFS{
                         }
                 }
             }
+            item.reset();
             std::atomic_thread_fence(std::memory_order_release);
             m_file->m_event.signal();
 
@@ -619,11 +623,16 @@ namespace DriveFS{
     }
     void FileIO::_upload(){
         std::string uploadUrl = m_account->getUploadUrlForFile(m_file);
+        auto uploadFileName = f_name + ".released";
+        if(uploadUrl.empty() && m_file->getIsTrashed()){
+            fs::remove(uploadFileName);
+            return;
+
+        }
 
         // make sure that the file is no longer setting attribute
         m_file->m_event.wait();
         m_file->m_event.signal();
-        auto uploadFileName = f_name + ".released";
         LOG(INFO) << "About to upload file \""<< m_file->getName() << "\"";
 
         bool status = m_account->upload(uploadUrl, uploadFileName, m_file->getFileSize());
@@ -643,7 +652,7 @@ namespace DriveFS{
     }
 
     void FileIO::move_files_to_download_after_finish_uploading() {
-        if(move_files_to_download_on_finish_upload){
+        if(move_files_to_download_on_finish_upload && !m_file->getIsTrashed()){
             auto uploadFileName = f_name + ".released";
             if(fs::exists(uploadFileName)) {
                 LOG(DEBUG) << "Moving " << m_file->getName() << " from upload cache to download cache";
@@ -702,6 +711,7 @@ namespace DriveFS{
                             }
 
                             close(out_fd);
+                            fs::permissions(out_path, fs::owner_all);
 
                             paths.push_back(out_path);
                             sizes.push_back(read_size);
@@ -881,10 +891,10 @@ namespace DriveFS{
 
                 mongocxx::model::update_one upsert_op(
                         document{} << "filename" << path.string() << finalize,
-                        document{} << "filename" << path.string()
+                        document{} << "$set" << open_document << "filename" << path.string()
                                    << "size" << ((int64_t) size)
                                    << "mtime" << st.st_mtim.tv_sec
-                                   << "exists" << true
+                                   << "exists" << true << close_document
                                    << finalize
                 );
 

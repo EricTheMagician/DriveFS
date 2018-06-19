@@ -432,13 +432,16 @@ namespace DriveFS {
 
             bsoncxx::document::value value{doc};
             ino_t inode;
+            if(doc["parents"].get_array().value.empty()){
+                continue;
+            }
 
             //get the inode of the object
             inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
 
             auto object = std::make_shared<DriveFS::_Object>(inode, doc);
 
-            if (!(object->getIsFolder() || object->getIsUploaded() || object->getIsTrashed()) ) {
+            if (!(object->getIsFolder() || object->getIsUploaded() || object->getIsTrashed())  ) {
 
                 FileIO *io = new FileIO(object, 0);
                 if (io->validateCachedFileForUpload(true)) {
@@ -1016,6 +1019,7 @@ namespace DriveFS {
     std::string Account::getUploadUrlForFile(GDriveObject file, std::string mimeType, int backoff) {
         refresh_token();
 
+
         http_client client("https://www.googleapis.com/upload/drive/v3", m_http_config);
         uri_builder builder("files");
         builder.append_query("supportsTeamDrives", "true");
@@ -1034,6 +1038,10 @@ namespace DriveFS {
             parents << parent->getId();
             atLeastOneParent = true;
         }
+        if(file->getIsTrashed()){
+            return "";
+        }
+
         assert(atLeastOneParent);
         bsoncxx::builder::stream::document doc;
 
@@ -1151,6 +1159,18 @@ namespace DriveFS {
             auto status_code = resp.status_code();
             stream.close();
             if (status_code == 200 || status_code == 201) {
+
+                bsoncxx::document::value doc = bsoncxx::from_json(resp.extract_utf8string().get());
+                bsoncxx::document::view value = doc.view();
+                try {
+                    if (auto fileId = value["id"]) {
+                        GDriveObject file = _Object::idToObject[fileId.get_utf8().value.to_string()];
+                        file->setIsUploaded(true);
+                    }
+                }catch(std::exception &e){
+                    LOG(ERROR) << e.what();
+                }
+
                 return true;
             } else if (status_code == 401) {
                 refresh_token();
