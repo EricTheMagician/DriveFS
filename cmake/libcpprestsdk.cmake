@@ -3,6 +3,7 @@ include(ExternalProject)
 set(CPPREST_LIB ${CMAKE_CURRENT_SOURCE_DIR}/external/lib/libcpprest.so)
 set(CPPREST_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/external/include)
 #find_package(PkgConfig)
+message(BOOST_ROOT is ${BOOST_ROOT})
 set(CMAKE_PREFIX_PATH "/usr/lib/cmake" "/usr/lib/x86_64-linux_gnu/cmake")
 ExternalProject_Add(cpprest
         PREFIX cpprest
@@ -21,6 +22,8 @@ ExternalProject_Add(cpprest
         CMAKE_CACHE_ARGS "-DCMAKE_CXX_FLAGS:STRING=-fPIC -Wno-error=format-truncation="
         CMAKE_CACHE_ARGS "-DCMAKE_BUILD_TYPE:STRING=Release"
         CMAKE_CACHE_ARGS "-DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_SOURCE_DIR}/external"
+        CMAKE_CACHE_ARGS "-DBOOST_ROOT:PATH=${BOOST_ROOT}"
+        CMAKE_CACHE_ARGS "-DWERROR:BOOL=OFF"
         BUILD_BYPRODUCTS ${CPPREST_LIB}
 
         )
