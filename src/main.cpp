@@ -158,15 +158,21 @@ int main(int argc, char **argv) {
     );
     DriveFS::FileIO::setAccount(&account);
     DriveFS::FileIO::maxCacheOnDisk = vm["cache-disk-size"].as<size_t>()*1024*1024;
+    if (account.needToInitialize()) {
+        account.run();
+        LOG(INFO) << "Your DriveFS Account has been initialized";
+        LOG(INFO) << "Restart DriveFS now.";
+        exit(0);
+        return 0;
+    }
+
     SFAsync( [&account]() {
         try {
+            LOG(INFO) << "Maximum cache disk size is " << DriveFS::FileIO::maxCacheOnDisk / 1024.0 / 1024.0 / 1024.0 << " GB";
             DriveFS::FileIO::checkCacheSize();
             LOG(INFO) << "Current size of cache is "
                       << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
 
-            if (account.needToInitialize()) {
-                account.run();
-            }
         }catch(std::exception &e){
             LOG(ERROR) << "There was an error with trying to calculate the initial size of the cache" << "\n"<<e.what();
         }
