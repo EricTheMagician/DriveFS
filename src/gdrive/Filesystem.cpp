@@ -641,6 +641,7 @@ namespace DriveFS{
         if(io!= nullptr) {
             reply_buf_limited(req, io->buffer->data(), io->accumulated_size,off,size);
         }else{
+            LOG(ERROR) << "When readding dir, the fi->fh was nullptr";
             int reply_err = fuse_reply_err(req, EIO);
             while(reply_err != 0){
                 reply_err = fuse_reply_err(req, EIO);
