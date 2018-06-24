@@ -61,17 +61,16 @@ endif()
 
 #add search for libbson
 find_package(PkgConfig REQUIRED)
-pkg_search_module(LIBBSON REQUIRED libbson-1.0)
+#pkg_search_module(LIBBSON REQUIRED libbson-1.0)
 target_include_directories(${PROJECT_NAME} PUBLIC
+        ./external/include/mongocxx/v_noabi/
+        ./external/include/bsoncxx/v_noabi/
         ./include
         ./external/include
         ./external
         ./external/adaptive_time_parser
         ./external/semaphore/common
         ./external/easyloggingpp/src
-        /usr/include/openssl-1.0
-        /usr/local/include/mongocxx/v_noabi
-        /usr/local/include/bsoncxx/v_noabi
         ${LIBFUSE_INCLUDE_DIRS}
         )
 
@@ -83,19 +82,28 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 SET(Boost_USE_MULTITHREAD ON)
 find_package(PkgConfig REQUIRED)
 find_package(Boost 1.66.0 COMPONENTS thread system program_options filesystem REQUIRED)
-find_library(LIBCRYPTO libcrypto.so.1.0.0)
-find_library(LIBSSL libssl.so.1.0.0)
+
+#find_package(OpenSSL 1.0 EXACT REQUIRED )
+find_package(OpenSSL EXACT REQUIRED )
 
 include(./cmake/libcpprestsdk.cmake)
-add_dependencies(${PROJECT_NAME} cpprest)
+include(./cmake/libmongocxx.cmake)
+MESSAGE("OPENSSL LIBRRAIES are :    ${OPENSSL_SSL_LIBBRARY} ${OPENSSL_CRYPTO_LIBBRARY}")
+MESSAGE("${OPENSSL_SSL_LIBBRARY}")
+MESSAGE("${OPENSSL_CRYPTO_LIBBRARY}")
+find_library(TCMALLOC_LIB NAMES tcmalloc tcmalloc-minimal libtcmalloc.so.4 libtcmalloc_minimal.so.4 HINTS /usr/lib /usr/lib/x86_64-linux-gnu)
+find_library(JEMALLOC_LIB NAMES jemalloc libjemalloc.so.1 HINTS /usr/lib /usr/lib/x86_64-linux-gnu)
+add_dependencies(${PROJECT_NAME} cpprest mongocxx)
 target_link_libraries(${PROJECT_NAME}
         ${LIBFUSE_LIBRARIES}
         pthread
-        ${LIBCRYPTO}
-        ${LIBSSL}
+        ${OPENSSL_SSL_LIBRARY}
+        ${OPENSSL_CRYPTO_LIBRARY}
         ${Boost_LIBRARIES}
         ${CPPREST_LIB}
-        mongocxx bsoncxx
+        ${MONGOCXX_LIB}
+#        ${TCMALLOC_LIB}
+        ${JEMALLOC_LIB}
         )
 
 target_compile_definitions(${PROJECT_NAME}
