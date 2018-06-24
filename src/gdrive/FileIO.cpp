@@ -866,10 +866,10 @@ namespace DriveFS{
         mongocxx::collection db = client[std::string(DBCACHENAME)];
 
         // reset the database to mark all unvisited files
-        db.update_many(
-                document{} << finalize,
-                document{} << "$set" << open_document << "exist" << false << close_document << finalize
-        );
+//        db.update_many(
+//                document{} << finalize,
+//                document{} << "$set" << open_document << "exists" << false << close_document << finalize
+//        );
 
         mongocxx::bulk_write documents;
         size_t size;
@@ -889,17 +889,34 @@ namespace DriveFS{
                 auto path = entry.path();
                 stat(path.string().c_str(), &st);
 
-                mongocxx::model::update_one upsert_op(
-                        document{} << "filename" << path.string() << finalize,
-                        document{} << "$set" << open_document << "filename" << path.string()
-                                   << "size" << ((int64_t) size)
-                                   << "mtime" << st.st_mtim.tv_sec
-                                   << "exists" << true << close_document
-                                   << finalize
-                );
+                auto maybeFound = db.find_one(document{} << "filename" << path.string() << finalize );
+                if(maybeFound){
+                    auto doc = maybeFound.value();
+                    auto value = doc.view();
+                    if(value["mtime"].get_int64() == st.st_mtim.tv_sec && value["size"].get_int64() == size ){
+                        continue;
+                    }else{
+                        mongocxx::model::update_one upsert_op(
+                                document{} << "filename" << path.string() << finalize,
+                                document{} << "$set" << open_document << "filename" << path.string()
+                                           << "size" << ((int64_t) size)
+                                           << "mtime" << st.st_mtim.tv_sec << close_document
+                                           << finalize
+                        );
+                        documents.append(upsert_op);
 
-                upsert_op.upsert(true);
-                documents.append(upsert_op);
+                    }
+                }else{
+                    mongocxx::model::insert_one insert_op(
+                            document{} << "filename" << path.string()
+                                       << "size" << ((int64_t) size)
+                                       << "mtime" << st.st_mtim.tv_sec
+                                       << finalize
+                    );
+                    documents.append(insert_op);
+                }
+
+
                 count++;
                 if(count == 100){
                     db.bulk_write(documents);
@@ -911,7 +928,7 @@ namespace DriveFS{
 
 
         }
-        if(needsUpdating)
+        if(needsUpdating && count > 0)
             db.bulk_write(documents);
     }
 
