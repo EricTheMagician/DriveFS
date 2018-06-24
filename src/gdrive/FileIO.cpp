@@ -970,12 +970,25 @@ namespace DriveFS{
                 options
         );
         auto toDelete = bsoncxx::builder::basic::array{};
+        uint_fast8_t nToDelete = 0;
         for( auto doc: cursor){
             std::string filename = doc["filename"].get_utf8().value.to_string();
             int64_t size = doc["size"].get_int64().value;
-            workingSize -= size;
-            unlink(filename.c_str());
+            if( fs::exists(fs::path(filename))) {
+                workingSize -= size;
+                unlink(filename.c_str());
+            }
             toDelete.append(filename);
+            nToDelete++;
+
+            if(nToDelete == 200){
+                nToDelete = 0;
+                db.delete_many(
+                        document{} << "filename" << open_document << "$in" << toDelete << close_document << finalize
+                );
+                toDelete.clear();
+
+            }
             if(workingSize < targetSize){
                 break;
             }
