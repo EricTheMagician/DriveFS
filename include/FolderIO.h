@@ -21,6 +21,14 @@ public:
 
     inline void addDirEntry(const char* name, const struct stat &attribute){
         size_t sz = fuse_add_direntry(req, nullptr, 0, name, nullptr, 0);
+        if(totalSize < (accumulated_size + sz)){
+            do{
+                totalSize *= 1.5;
+            }
+            while(totalSize <= (accumulated_size + sz) );
+            buffer->resize(totalSize);
+        }
+
         fuse_add_direntry(req, buffer->data() + accumulated_size,
                           totalSize-accumulated_size,
                           name, &attribute, accumulated_size + sz);
