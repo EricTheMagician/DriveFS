@@ -664,12 +664,12 @@ namespace DriveFS{
         struct statvfs stat{
             .f_bsize = 1,
             .f_frsize=  65536*4,
-            .f_blocks=  1000000,
-            .f_bfree=  1000000,
-            .f_bavail=  1000000,
+            .f_blocks=  1000000000000,
+            .f_bfree=  1000000000000,
+            .f_bavail=  1000000000000,
             .f_files=  1000000,
-            .f_ffree=  1000000,
-            .f_favail=  1000000,
+            .f_ffree=  1000000000000,
+            .f_favail=  1000000000000,
             .f_fsid=  1000000,
             .f_flag=  0,
         };
