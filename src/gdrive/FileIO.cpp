@@ -591,10 +591,17 @@ namespace DriveFS{
                                    if (io->checkFileExists()) {
                                        sleep(3);
                                        // file can have no parents happen when launching DriveFS
-                                       // so wait until it is filled
-                                       while(io->m_file->parents.empty());
+                                       // so wait until it is filled. if it's deleted
+                                       auto file = io->m_file;
+                                       while(io->m_file->parents.empty() && !io->m_file->getIsTrashed() && !io->m_file->getIsUploaded());
 
-                                       io->_upload();
+                                       if(file->getIsTrashed()){
+                                           io->checkFileExists();
+                                       }else if(!file->getIsUploaded()) {
+                                           io->_upload();
+                                       }else{
+                                           io->move_files_to_download_after_finish_uploading();
+                                       }
                                    }
 
 
@@ -966,7 +973,7 @@ namespace DriveFS{
         mongocxx::options::find options;
         options.sort( document{} << "mtime" << -1 << finalize);
         auto cursor = db.find(
-                document{} << "exists" << true << finalize,
+                document{} << finalize,
                 options
         );
         auto toDelete = bsoncxx::builder::basic::array{};
@@ -975,18 +982,18 @@ namespace DriveFS{
             std::string filename = doc["filename"].get_utf8().value.to_string();
             int64_t size = doc["size"].get_int64().value;
             if( fs::exists(fs::path(filename))) {
-                workingSize -= size;
-                unlink(filename.c_str());
+                if(unlink(filename.c_str()) == 0 )
+                    workingSize -= size;
             }
             toDelete.append(filename);
             nToDelete++;
 
-            if(nToDelete == 200){
+            if(nToDelete == 100){
                 nToDelete = 0;
                 db.delete_many(
                         document{} << "filename" << open_document << "$in" << toDelete << close_document << finalize
                 );
-                toDelete.clear();
+                toDelete = bsoncxx::builder::basic::array{};
 
             }
             if(workingSize < targetSize){
@@ -994,12 +1001,17 @@ namespace DriveFS{
             }
         }
 
-        db.delete_many(
-                document{} << "filename" << open_document << "$in" << toDelete << close_document << finalize
-        );
+        if(nToDelete > 0) {
+            db.delete_many(
+                    document{} << "filename" << open_document << "$in" << toDelete << close_document << finalize
+            );
+        }
 
         int64_t delta = workingSize-oldSize;
-        incrementCacheSize(delta);
+        auto newSize = incrementCacheSize(delta);
+        if(newSize > FileIO::maxCacheOnDisk){
+            deleteFilesFromCacheOnDisk();
+        }
 
 
 
@@ -1018,7 +1030,13 @@ namespace DriveFS{
                 if(newSize > maxCacheOnDisk) {
                     if (deleteCacheMutex.try_lock()) {
 
-                        deleteFilesFromCacheOnDisk();
+                        try {
+                            deleteFilesFromCacheOnDisk();
+                        }catch(std::exception &e){
+                            deleteCacheMutex.unlock();
+                            LOG(ERROR) << "There was an error when deleting files from disk: " << e.what();
+                            throw;
+                        }
 
                         deleteCacheMutex.unlock();
 
@@ -1078,7 +1096,9 @@ namespace DriveFS{
         option.upsert(true);
         mongocxx::bulk_write documents;
         size_t totalSize = 0;
+        bool needsWriting = false;
         for(int i = 0; i < paths.size(); i++) {
+            needsWriting = true;
             const auto & path = paths[i];
             mongocxx::model::update_one upsert_op(
                     document{} << "filename" << path.string() << finalize,
@@ -1091,12 +1111,19 @@ namespace DriveFS{
             upsert_op.upsert(true);
             documents.append(upsert_op);
             totalSize += sizes[i];
+            if( (i % 100) == 0){
+                db.bulk_write(documents);
+                needsWriting = false;
+                documents = mongocxx::bulk_write{};
+            }
 
         }
 
-        db.bulk_write(documents);
-
         incrementCacheSize(totalSize);
+
+        if(needsWriting)
+            db.bulk_write(documents);
+
         LOG(INFO) << "Current size of cache is "
                   << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
 
