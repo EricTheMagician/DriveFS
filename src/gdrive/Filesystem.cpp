@@ -830,6 +830,15 @@ namespace DriveFS{
             return;
         }
 
+        if( strchr(name, '/') != nullptr){
+            LOG(ERROR) << "File with a forward slash is illegal: " << name;
+            int reply_err = fuse_reply_err(req, EINVAL);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, EINVAL);
+            }
+            return;
+        }
+
         for (auto child: parent->children) {
             if (child->getName().compare(name) == 0) {
                 LOG(INFO) << "When creating file with name " << name << " parentId " << parent->getId() << " already existed";

@@ -314,6 +314,10 @@ namespace DriveFS {
                         auto inode = inode_count.fetch_add(1, std::memory_order_acquire) + 1;
                         auto file = std::make_shared<DriveFS::_Object>(inode, fileDoc);
 
+                        if(file->getName().find('/') != std::string::npos){
+                            continue;
+                        }
+
                         _Object::idToObject[file->getId()] = file;
                         _Object::inodeToObject[inode] = file;
 
@@ -468,7 +472,13 @@ namespace DriveFS {
 
             }
 
-            if(!object->getIsTrashed()) {
+            if(!object->getIsTrashed()){
+
+                if(object->getName().find('/') != std::string::npos) {
+                    LOG(ERROR) << "The file name contained a slash, which is illegal on unix";
+                    LOG(ERROR) << "File name is: " << object->getName();
+                    continue;
+                }
                 std::string id = object->getId();
                 DriveFS::_Object::idToObject[id] = object;
                 DriveFS::_Object::inodeToObject[inode] = object;
