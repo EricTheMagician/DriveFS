@@ -217,7 +217,7 @@ namespace DriveFS{
 #if FUSE_USE_VERSION >= 30
                 fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
 #else
-                fuse_lowlevel_notify_inval_inode(this->fuse_channel, parent_ino, 0, 0);
+                fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
 #endif
 
 
@@ -869,7 +869,7 @@ namespace DriveFS{
 #if FUSE_USE_VERSION >= 30
         fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
 #else
-        fuse_lowlevel_notify_inval_inode(this->fuse_channel, parent_ino, 0, 0);
+        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
 #endif
 
 
