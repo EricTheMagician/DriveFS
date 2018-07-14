@@ -202,6 +202,8 @@ namespace DriveFS{
                 parent->m_event.signal();
                 signaled = true;
 
+                LOG(TRACE) << "Deleting file/folder with name " << name << " and parentId: "  << parent->getId();
+
                 if (child->getIsUploaded()) {
                     child->m_event.wait();
                     account->removeChildFromParent(child, parent);
