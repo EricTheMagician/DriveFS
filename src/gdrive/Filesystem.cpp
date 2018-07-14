@@ -438,6 +438,10 @@ namespace DriveFS{
             }
 
             auto buf = io->read(size, off);
+            if(buf == nullptr){
+                fuse_reply_err(req, ENOENT);
+                return;
+            }
             auto outsize = buf->size();
 
             if (outsize != size) {

@@ -14,6 +14,8 @@
 #include <sys/sendfile.h>
 #include <atomic>
 
+#define INVALID_CACHE_DELETED 4
+
 static std::mutex deleteCacheMutex;
 #define DBCACHENAME "FileCacheDB"
 using namespace web::http::client;          // HTTP client features
@@ -164,7 +166,27 @@ namespace DriveFS{
         };
 
         if(resp.status_code() == 404){
-            throw std::runtime_error("need to handle the case when the file has been deleted");
+            if(backoff < 2){
+                LOG(ERROR) << "Received a 404 while downloading a chunk.";
+                int sec = (backoff + 1) *5;
+                LOG(INFO) << "Sleeping for " << sec <<" seconds before retrying";
+                LOG(DEBUG) << "id: " << file->getId();
+                LOG(DEBUG) << "name: " << file->getName();
+                std::stringstream ss;
+                ss << "[ ";
+                for(const auto & parent: file->parents){
+                    ss << "(" << parent->getId() << ", " << parent->getName() << "), ";
+                }
+                ss << "]";
+                LOG(DEBUG) << "parents: " << ss.str();
+                sleep(sec);
+                FileIO::download(std::move(file), std::move(cache), std::move(cacheName), start, end, backoff+1);
+
+                return;
+            }
+            cache->setIsInvalid(INVALID_CACHE_DELETED);
+            cache->event.signal();
+            return;
         }
         if(resp.status_code() != 206 && resp.status_code() != 200){
             LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
@@ -324,6 +346,11 @@ namespace DriveFS{
 
             if(item->isInvalid || (!bufferMatchesExpectedBufferSize(item->buffer->size())) ){
                 item->isInvalid = true;
+                if(item->invalidReason == INVALID_CACHE_DELETED){
+                    _Object::trash(m_file);
+                    delete buffer;
+                    return nullptr;
+                }
                 LOG(TRACE) << "cache was invalid for " << m_file->getName();
                 chunksToDownload.push_back(chunkNumber);
             } else {

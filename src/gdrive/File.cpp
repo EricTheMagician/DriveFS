@@ -443,6 +443,15 @@ namespace DriveFS{
         }
     }
 
+    void _Object::trash(GDriveObject file){
+        if(!file)
+            return;
+        file->trash();
+        for(const auto &parent: file->parents){
+            parent->removeChild(file);
+        }
+    }
+
     GDriveObject _Object::findChildByName(const char *name) const {
         for (auto child: children) {
             if (child->getName().compare(name) == 0) {

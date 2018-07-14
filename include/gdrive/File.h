@@ -54,6 +54,7 @@ namespace DriveFS {
         inline void setIsUploaded(bool status) {isUploaded = status;}
         inline bool getIsTrashed() const {return trashed; }
         void trash();
+        static void trash(GDriveObject file);
         std::string md5() const { return md5Checksum; };
         GDriveObject findChildByName( const char *name) const ;
         bsoncxx::document::value to_bson(bool includeId=true) const;
