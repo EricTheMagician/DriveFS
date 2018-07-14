@@ -1099,7 +1099,7 @@ namespace DriveFS {
             location = getUploadUrlForFile(file, mimeType, backoff + 1);
         }else if (resp.status_code() != 200) {
             unsigned int sleep_time = std::pow(2, backoff);
-            if(backoff < 5) {
+            if(backoff > 5) {
                 LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase() << "\n\t"
                            << resp.extract_utf8string(true).get();
                 LOG(INFO) << "Sleeping for " << sleep_time << " second before retrying";
