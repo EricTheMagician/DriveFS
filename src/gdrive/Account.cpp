@@ -1103,6 +1103,9 @@ namespace DriveFS {
             unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " second before retrying";
             sleep(sleep_time);
+            if (backoff >= 15){
+                backoff = 14;
+            }
             location = getUploadUrlForFile(file, mimeType, backoff + 1);
         } else {
             location = resp.headers()["Location"];
