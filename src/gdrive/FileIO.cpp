@@ -168,15 +168,36 @@ namespace DriveFS{
         }
         if(resp.status_code() != 206 && resp.status_code() != 200){
             LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
-            LOG(ERROR) << resp.extract_json(true).get();
+            try {
+                if(resp.status_code() < 500) {
+                    LOG(ERROR) << resp.extract_json(true).get();
+                }else{
+                    LOG(ERROR) << "status code is "<< resp.status_code();
+                }
+            }catch(std::exception &e){
+                LOG(ERROR) << e.what() << " - " << resp.status_code();
+            };
             const unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
             download(std::move(file), std::move(cache), std::move(cacheName), start, end, backoff + 1);
             return;
-        }
+         }
 
-        cache->buffer = new std::vector<unsigned char>(resp.extract_vector().get());
+        try {
+            cache->buffer = new std::vector<unsigned char>(resp.extract_vector().get());
+        }catch(std::exception &e){
+            LOG(ERROR) << "There was an error while reading downloaded chunk: " << e.what();
+            LOG(DEBUG) << "Chunk-range" << start << " - " << end;
+            if(file) {
+                LOG(DEBUG) << "File ID " << file->getId();
+                LOG(DEBUG) << "File Size " << file->getFileSize();
+            }
+            LOG(DEBUG) << "Url " << builder.to_string();
+            LOG(INFO) << "Retrying";
+            FileIO::download(std::move(file), std::move(cache), std::move(cacheName), start, end, backoff);
+            return;
+        }
         std::atomic_thread_fence(std::memory_order_release);
         cache->event.signal();
 

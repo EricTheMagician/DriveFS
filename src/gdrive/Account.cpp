@@ -226,7 +226,7 @@ namespace DriveFS {
 
                     auto found = _Object::idToObject.find(id);
 
-                    if (found != _Object::idToObject.cend()) {
+                    if (found != _Object::idToObject.end()) {
                         GDriveObject file = found->second;
                         std::vector<GDriveObject> oldParents = file->parents;
                         auto fileView = fileDoc.value;
@@ -1174,8 +1174,14 @@ namespace DriveFS {
                 bsoncxx::document::view value = doc.view();
                 try {
                     if (auto fileId = value["id"]) {
-                        GDriveObject file = _Object::idToObject[fileId.get_utf8().value.to_string()];
-                        file->setIsUploaded(true);
+                        const auto id = fileId.get_utf8().value.to_string();
+                        auto cursor = _Object::idToObject.find(id);
+                        if(cursor != _Object::idToObject.end()) {
+                            cursor->second->setIsUploaded(true);
+                        }else{
+                            // if we are here, it's probably because the file has been deleted.
+                            LOG(ERROR) << "We should not reach here: " << id;
+                        }
                     }
                 }catch(std::exception &e){
                     LOG(ERROR) << e.what();
