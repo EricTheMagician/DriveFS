@@ -439,6 +439,19 @@ namespace DriveFS{
 
             auto buf = io->read(size, off);
             if(buf == nullptr){
+                if(io->m_file){
+                    Account *account = getAccount(req);
+                    for(const auto &parent: io->m_file->parents) {
+#if FUSE_USE_VERSION >= 30
+                        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent->attribute.st_ino, 0, 0);
+#else
+                        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent->attribute.st_ino, 0, 0);
+#endif
+                    }
+                   _Object::trash(io->m_file);
+                    fuse_lowlevel_notify_inval_inode(account->fuse_session, io->m_file->attribute.st_ino, 0, 0);
+                }
+
                 fuse_reply_err(req, ENOENT);
                 return;
             }
