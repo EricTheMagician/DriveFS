@@ -79,9 +79,12 @@ public:
             delete buffer;
             buffer = nullptr;
             size = 0;
+        }
+        if(reason != 0) {
             invalidReason = reason;
             std::atomic_thread_fence(std::memory_order_release);
         }
+
     }
 
 
