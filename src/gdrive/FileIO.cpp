@@ -1037,6 +1037,11 @@ namespace DriveFS{
             nToDelete++;
 
             if(nToDelete == 100){
+                int64_t delta = workingSize-oldSize;
+                oldSize = incrementCacheSize(delta);
+                workingSize = oldSize;
+
+
                 nToDelete = 0;
                 db.delete_many(
                         document{} << "filename" << open_document << "$in" << toDelete << close_document << finalize
