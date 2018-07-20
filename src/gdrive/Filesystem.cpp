@@ -449,9 +449,14 @@ namespace DriveFS{
 #endif
                     }
                    _Object::trash(io->m_file);
+#if FUSE_USE_VERSION >= 30
                     fuse_lowlevel_notify_inval_inode(account->fuse_session, io->m_file->attribute.st_ino, 0, 0);
+#else
+                    fuse_lowlevel_notify_inval_inode(account->fuse_channel, io->m_file->attribute.st_ino, 0, 0);
+#endif
                 }
 
+                LOG(ERROR) << "Buffer was null when trying to read file witih id " << io->m_file->getId();
                 fuse_reply_err(req, ENOENT);
                 return;
             }
