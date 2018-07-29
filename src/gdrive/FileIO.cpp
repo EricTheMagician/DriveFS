@@ -578,8 +578,7 @@ namespace DriveFS{
     }
 
     void FileIO::setFileName(){
-        fs::path file_location(FileIO::cachePath);
-        file_location /= std::string("upload");
+        fs::path file_location(FileIO::uploadPath);
         file_location /= m_file->getId();
         f_name = file_location.string();
     }
@@ -1116,7 +1115,7 @@ namespace DriveFS{
     }
 
     void FileIO::deleteFileFromUploadCache(const std::string &id) {
-        fs::path path = downloadPath;
+        fs::path path = uploadPath;
         path /= id;
         if( fs::exists(path)){
             LOG(INFO) << "Removing cached file";
