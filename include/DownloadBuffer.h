@@ -28,7 +28,7 @@ public:
 
     int64_t last_access=0;
     bool isInvalid=false;
-    uint_fast8_t invalidReason=0;
+    std::atomic<uint_fast8_t> invalidReason=0;
     AutoResetEvent event;
 
     __no_collision_download__(): buffer(nullptr), size(0), name(""), isInvalid(false){
@@ -81,8 +81,7 @@ public:
             size = 0;
         }
         if(reason != 0) {
-            invalidReason = reason;
-            std::atomic_thread_fence(std::memory_order_release);
+            invalidReason.store(reason, std::memory_order_release);
         }
 
     }

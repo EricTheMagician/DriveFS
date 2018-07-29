@@ -166,8 +166,8 @@ namespace DriveFS{
         };
 
         if(resp.status_code() == 404){
+            LOG(ERROR) << "Received a 404 while downloading a chunk.";
             if(backoff < 2){
-                LOG(ERROR) << "Received a 404 while downloading a chunk.";
                 int sec = (backoff + 1) *5;
                 LOG(INFO) << "Sleeping for " << sec <<" seconds before retrying";
                 LOG(DEBUG) << "id: " << file->getId();
@@ -184,6 +184,7 @@ namespace DriveFS{
 
                 return;
             }
+            LOG(ERROR) << "After 2 tries, giving up for id " << file->getId();
             cache->setIsInvalid(INVALID_CACHE_DELETED);
             cache->event.signal();
             return;
@@ -330,7 +331,7 @@ namespace DriveFS{
         m_file->create_heap_handles(block_download_size);
 //        LOG(INFO) << "Calling signal " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.signal();
-        auto buffer = new std::vector<unsigned char>(size, 0);
+        std::vector<unsigned char> *buffer = nullptr;
         auto path_to_buffer = FileIO::cachePath;
         path_to_buffer /= "download";
         path_to_buffer /= m_file->getId();
@@ -345,15 +346,14 @@ namespace DriveFS{
             }
 
             if(item->isInvalid || (!bufferMatchesExpectedBufferSize(item->buffer->size())) ){
-                item->isInvalid = true;
-                if(item->invalidReason == INVALID_CACHE_DELETED){
-                    _Object::trash(m_file);
-                    delete buffer;
+                if(item->invalidReason.load(std::memory_order_acquire) == INVALID_CACHE_DELETED){
                     return nullptr;
                 }
+                item->isInvalid = true;
                 LOG(TRACE) << "cache was invalid for " << m_file->getName();
                 chunksToDownload.push_back(chunkNumber);
             } else {
+                buffer = new std::vector<unsigned char>(size, 0);
                 const uint64_t start = off % block_download_size;
                 const uint64_t size2 = spillOver ? item->buffer->size() - start: size;
                 spillOverPrecopy = size2;
@@ -371,7 +371,7 @@ namespace DriveFS{
         }else{
             item = getFromCache(path_to_buffer, chunkStart);
             if( item) {
-
+                buffer = new std::vector<unsigned char>(size, 0);
                 const uint64_t start = off % block_download_size;
                 const uint64_t size2 = spillOver ? item->buffer->size() - start: size;
                 spillOverPrecopy = size2;
@@ -394,50 +394,59 @@ namespace DriveFS{
         }
 
         if(spillOver) {
+            const uint64_t chunkNumber2 = chunkNumber + 1;
+            if( buffer != nullptr) {
+                const uint64_t chunkStart2 = chunkStart + block_download_size;
 
-            const uint64_t chunkStart2 = chunkStart + block_download_size;
-            const uint64_t chunkNumber2 = chunkNumber+1;
+                path_to_buffer = FileIO::cachePath;
+                path_to_buffer /= "download";
+                path_to_buffer /= m_file->getId() + "-" + std::to_string(chunkStart2);
 
-            path_to_buffer = FileIO::cachePath;
-            path_to_buffer /= "download";
-            path_to_buffer /= m_file->getId() + "-" + std::to_string(chunkStart2);
+                cacheName = m_file->getId() + "-" + std::to_string(chunkStart2);
+                DownloadItem item;
 
-            cacheName = m_file->getId() + "-" + std::to_string(chunkStart2);
-            DownloadItem item;
+                if ((item = m_file->m_buffers->at(chunkNumber2).lock())) {
+                    if (item) {
+                        if (item->buffer == nullptr || item->buffer->empty()) {
+                            item->event.wait();
+                            item->event.signal();
+                        }
 
-            if ( (item=m_file->m_buffers->at(chunkNumber2).lock()) ) {
-                if(item) {
-                    if( item->buffer == nullptr || item->buffer->empty() ){
-                        item->event.wait();
-                        item->event.signal();
-                    }
-
-                    if(item->isInvalid || (!bufferMatchesExpectedBufferSize(item->buffer->size())) ){
-                        item->isInvalid = true;
-                        LOG(TRACE) << "cache was invalid for " << m_file->getName();
-                        chunksToDownload.push_back(chunkNumber2);
-                    }else{
-                        uint64_t size2 = (off + size) % block_download_size;
-                        assert((spillOverPrecopy+size2) <= buffer->size());
-                        memcpy( buffer->data() + spillOverPrecopy, item->buffer->data(), size2);
+                        if (item->isInvalid || (!bufferMatchesExpectedBufferSize(item->buffer->size()))) {
+                            if (item->invalidReason.load(std::memory_order_acquire) == INVALID_CACHE_DELETED) {
+                                LOG(TRACE) << "Confirming that a 404 was received";
+                                if (buffer != nullptr)
+                                    delete buffer;
+                                return nullptr;
+                            }
+                            item->isInvalid = true;
+                            LOG(TRACE) << "cache was invalid for " << m_file->getName();
+                            chunksToDownload.push_back(chunkNumber2);
+                        } else {
+                            uint64_t size2 = (off + size) % block_download_size;
+                            assert((spillOverPrecopy + size2) <= buffer->size());
+                            memcpy(buffer->data() + spillOverPrecopy, item->buffer->data(), size2);
 //                        m_file->cache.updateAccessTime(m_file, chunkNumber2, item);
+                        }
+
+                    } else {
+                        chunksToDownload.push_back(chunkNumber2);
                     }
 
-                }else{
-                    chunksToDownload.push_back(chunkNumber2);
+                } else {
+                    item = getFromCache(path_to_buffer, chunkStart2);
+                    if (item) {
+                        uint64_t size2 = (off + size) % block_download_size;
+                        assert((spillOverPrecopy + size2) <= buffer->size());
+                        memcpy(buffer->data() + spillOverPrecopy, item->buffer->data(), size2);
+                    } else {
+                        chunksToDownload.push_back(chunkNumber2);
+                    }
                 }
-
-            } else {
-                item = getFromCache(path_to_buffer, chunkStart2);
-                if( item) {
-                    uint64_t size2 = (off + size) % block_download_size;
-                    assert((spillOverPrecopy + size2) <= buffer->size());
-                    memcpy(buffer->data() + spillOverPrecopy, item->buffer->data(), size2);
-                }else{
-                    chunksToDownload.push_back(chunkNumber2);
-                }
+                item.reset();
+            }else{
+                chunksToDownload.push_back(chunkNumber2);
             }
-            item.reset();
 
         }
 
@@ -562,7 +571,7 @@ namespace DriveFS{
         if(done){
             return buffer;
         }else{
-            delete buffer;
+            if( buffer != nullptr) delete buffer;
             return getFromCloud(size, off);
         }
 
