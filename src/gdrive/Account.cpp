@@ -1092,7 +1092,6 @@ namespace DriveFS {
         if(resp.status_code() == 404){
             LOG(ERROR) << "Failed to get uploadUrl: " << resp.reason_phrase() << "\n\t"
                        << "for file with id " << file->getId();
-            file->setNewId(getNextId());
             unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " second before retrying";
             sleep(sleep_time);
@@ -1290,6 +1289,16 @@ namespace DriveFS {
 
         return true;
 
+    }
+    void Account::removeFileWithIDFromDB(std::string id){
+        mongocxx::pool::entry conn = pool.acquire();
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection db = client[std::string(DATABASEDATA)];
+        try {
+            db.delete_one(document{} << "id" << id << finalize);
+        }catch(std::exception &e){
+            LOG(ERROR) << "There was an error when removing an item from the databasee: " << e.what();
+        }
     }
 
 }

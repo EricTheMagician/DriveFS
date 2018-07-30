@@ -213,7 +213,11 @@ namespace DriveFS{
                     child->trash();
                     parent->removeChild(child);
                     child->removeParent(parent);
-                    account->upsertFileToDatabase(child);
+                    if(child->parents.empty()) {
+                        account->removeFileWithIDFromDB(child->getId());
+                    }else{
+                        account->upsertFileToDatabase(child);
+                    }
                 }
 
 #if FUSE_USE_VERSION >= 30

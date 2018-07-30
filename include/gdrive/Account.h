@@ -58,6 +58,7 @@ namespace DriveFS {
         std::optional<int64_t> getResumableUploadPoint(std::string url, size_t fileSize, int backoff=0);
         bool updateObjectProperties(std::string id, std::string json, std::string addParents="", std::string removeParents="", int backoff=0);
         std::string getNextId();
+        void removeFileWithIDFromDB(std::string id);
     protected:
         void run_internal() override;
         void loadFilesAndFolders() override;
