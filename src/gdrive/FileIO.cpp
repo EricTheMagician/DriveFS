@@ -167,8 +167,8 @@ namespace DriveFS{
 
         if(resp.status_code() == 404){
             LOG(ERROR) << "Received a 404 while downloading a chunk.";
-            if(backoff < 2){
-                int sec = (backoff + 1) *5;
+            if(backoff < 1){
+                int sec = (backoff + 1);
                 LOG(INFO) << "Sleeping for " << sec <<" seconds before retrying";
                 LOG(DEBUG) << "id: " << file->getId();
                 LOG(DEBUG) << "name: " << file->getName();
@@ -184,7 +184,7 @@ namespace DriveFS{
 
                 return;
             }
-            LOG(ERROR) << "After 2 tries, giving up for id " << file->getId();
+            LOG(ERROR) << "Giving up for id " << file->getId();
             cache->setIsInvalid(INVALID_CACHE_DELETED);
             cache->event.signal();
             return;
@@ -832,10 +832,9 @@ namespace DriveFS{
                 released = fs::path(f_name);
             }
             released += ".released";
-            try {
+            if(fs::exists(f_name)){
                 fs::rename(f_name, released);
-            }catch(std::exception &e){
-                LOG(ERROR) << e.what() << std::endl << m_file->getName() << "\t" << m_file->getId();
+            }else{
                 b_needs_uploading = false;
             }
 
