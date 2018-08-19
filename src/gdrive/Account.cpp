@@ -418,13 +418,20 @@ namespace DriveFS {
         mongocxx::collection db = client[std::string(DATABASEDATA)];
         //find root
 
-        auto maybeRoot = db.find_one(document{} << "name" << "My Drive"
+        auto maybeRoot = db.find_one(document{} << "isRoot" << 1
                                                 << "parents"
                                                 << open_document << "$exists" << 0
                                                 << close_document << finalize);
         GDriveObject root;
         if (maybeRoot) {
             root = DriveFS::_Object::buildRoot(*maybeRoot);
+        }else{
+            LOG(WARNING) << "Root folder not found. Attemping to fix. "
+                            << "You should not see this message more than once.";
+
+            root = DriveFS::_Object::buildRoot(getRootFolder());
+
+
         }
 
         auto cursor = db.find(document{} << "parents" << open_document << "$exists" << 1 << close_document << finalize);
@@ -560,27 +567,7 @@ namespace DriveFS {
         } else {
             uriBuilder.append_query("pageToken", "1");
             // get root metadata
-            LOG(TRACE) << "Getting root folder";
-            auto response = client.request(methods::GET, "files/root").get().extract_utf8string();
-            bsoncxx::document::value doc = bsoncxx::from_json(response.get());
-            bsoncxx::document::view value = doc.view();
-            mongocxx::pool::entry conn = pool.acquire();
-            mongocxx::database client = conn->database(std::string(DATABASENAME));
-            mongocxx::collection data = client[std::string(DATABASEDATA)];
-
-            auto rootValue = value["id"];
-            if (rootValue) {
-                auto rootId = rootValue.get_utf8().value.to_string();
-                data.update_one(
-                        document{} << "id" << rootId << finalize,
-                        document{} << "$set" << open_document
-                                   << concatenate(value)
-                                   << close_document << finalize,
-                        upsert
-                );
-
-
-            }
+            getRootFolder();
         }
 
         uriBuilder.append_query("pageSize", "500");
@@ -724,6 +711,33 @@ namespace DriveFS {
 
     }
 
+    bsoncxx::document::value Account::getRootFolder(){
+        LOG(TRACE) << "Getting root folder";
+        http_client http_client(m_apiEndpoint, m_http_config);
+        auto response = http_client.request(methods::GET, "files/root").get().extract_utf8string();
+        bsoncxx::document::value doc = bsoncxx::from_json(response.get());
+        bsoncxx::document::view value = doc.view();
+        mongocxx::pool::entry conn = pool.acquire();
+        mongocxx::database client = conn->database(std::string(DATABASENAME));
+        mongocxx::collection data = client[std::string(DATABASEDATA)];
+
+        auto rootValue = value["id"];
+        if (rootValue) {
+            auto rootId = rootValue.get_utf8().value.to_string();
+            data.update_one(
+                    document{} << "id" << rootId << finalize,
+                    document{} << "$set" << open_document
+                               << concatenate(value)
+                               << "isRoot" << 1
+                               << close_document << finalize,
+                    upsert
+            );
+
+
+        }
+        return doc;
+
+    }
     void Account::getTeamDrives(int backoff) {
         refresh_token();
 

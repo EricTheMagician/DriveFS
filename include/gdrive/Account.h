@@ -72,6 +72,8 @@ namespace DriveFS {
         std::string createFolderOnGDrive(const std::string json, int backoff=0);
         bool trash(GDriveObject file, int backoff=0);
         void background_update(std::string teamDriveId="", bool skip_sleep=false);
+        bsoncxx::document::value getRootFolder();
+
         boost::circular_buffer<std::string> m_id_buffer;
 
         std::map<std::string, std::string> m_newStartPageToken; // map teamDriveId to newStartPageToken
