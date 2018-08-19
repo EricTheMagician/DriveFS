@@ -1092,13 +1092,11 @@ namespace DriveFS{
 
                         try {
                             deleteFilesFromCacheOnDisk();
+                            deleteCacheMutex.unlock();
                         }catch(std::exception &e){
                             deleteCacheMutex.unlock();
                             LOG(ERROR) << "There was an error when deleting files from disk: " << e.what();
-                            throw;
                         }
-
-                        deleteCacheMutex.unlock();
 
                     }
                 }
