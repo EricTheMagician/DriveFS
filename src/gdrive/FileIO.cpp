@@ -126,7 +126,7 @@ namespace DriveFS{
         }
         m_account->refresh_token();
         VLOG(9) << "Downloading " << file->getName() <<"\t" << start;
-        http_client client = m_account->getClient();
+        http_client client = m_account->getClient(30); // timeout after 30s
         uri_builder builder( std::string("files/") +  file->getId());
         builder.append_query("alt", "media");
 //        builder.append_query("acknowledgeAbuse", "true");
@@ -384,13 +384,10 @@ namespace DriveFS{
 
                 assert((start+size2) <= item->buffer->size());
                 memcpy(buffer->data(), item->buffer->data()+start, size2);
-
-
-
+                item.reset();
             }else{
                 chunksToDownload.push_back(chunkNumber);
             }
-            item.reset();
         }
 
         if(spillOver) {

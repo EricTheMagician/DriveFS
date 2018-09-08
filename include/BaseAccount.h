@@ -44,6 +44,13 @@ public:
     return http_client(m_apiEndpoint, m_http_config);
   }
 
+  inline http_client getClient(int timeout_in_seconds) {
+    refresh_token();
+    auto config = m_http_config;
+    config.set_timeout(std::chrono::seconds(timeout_in_seconds));
+    return http_client(m_apiEndpoint, config);
+  }
+
   inline struct fuse_session *getFuseSession() const { return m_fuse_session; }
   inline void setFuseSession(struct fuse_session *session) {
     m_fuse_session = session;
