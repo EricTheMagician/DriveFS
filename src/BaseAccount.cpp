@@ -3,8 +3,8 @@
 //
 
 #include "BaseAccount.h"
-#include <easylogging++.h>
 #include <boost/exception/all.hpp>
+#include <easylogging++.h>
 
 using namespace utility;
 using namespace web;
@@ -13,170 +13,149 @@ using namespace web::http::client;
 using namespace web::http::oauth2::experimental;
 using namespace web::http::experimental::listener;
 
-//Some of the code is copied from microsoft's cpprest sdk which is licensed under MIT
+// Some of the code is copied from microsoft's cpprest sdk which is licensed
+// under MIT
 
 //
 // Utility method to open browser on Windows, OS X and Linux systems.
 //
-static void open_browser(utility::string_t auth_uri)
-{
+static void open_browser(utility::string_t auth_uri) {
 #if defined(_WIN32) && !defined(__cplusplus_winrt)
-    // NOTE: Windows desktop only.
-    auto r = ShellExecuteA(NULL, "open", conversions::utf16_to_utf8(auth_uri).c_str(), NULL, NULL, SW_SHOWNORMAL);
+  // NOTE: Windows desktop only.
+  auto r =
+      ShellExecuteA(NULL, "open", conversions::utf16_to_utf8(auth_uri).c_str(),
+                    NULL, NULL, SW_SHOWNORMAL);
 #elif defined(__APPLE__)
-    // NOTE: OS X only.
-    string_t browser_cmd(U("open \"") + auth_uri + U("\""));
-    (void)system(browser_cmd.c_str());
+  // NOTE: OS X only.
+  string_t browser_cmd(U("open \"") + auth_uri + U("\""));
+  (void)system(browser_cmd.c_str());
 #else
-    // NOTE: Linux/X11 only.
-    std::string browser_cmd(U("xdg-open \"") + auth_uri + U("\""));
-    (void)system(browser_cmd.c_str());
+  // NOTE: Linux/X11 only.
+  std::string browser_cmd(U("xdg-open \"") + auth_uri + U("\""));
+  (void)system(browser_cmd.c_str());
 #endif
 }
 
-oauth2_code_listener::oauth2_code_listener(
-            uri listen_uri,
-            oauth2_config& config) :
-            m_listener(new http_listener(listen_uri)),
-            m_config(config)
-    {
-        m_listener->support([this](http::http_request request) -> void
-                            {
-                                if (request.request_uri().path() == U("/") && request.request_uri().query() != U(""))
-                                {
-                                    m_resplock.lock();
-                                    try {
-                                        m_config.token_from_redirected_uri(request.request_uri()).then(
-                                                [this, request](pplx::task<void> token_task) -> void {
-                                                    try {
-                                                        token_task.wait();
-                                                        m_tce.set(true);
-                                                    }
-                                                    catch (const oauth2_exception &e) {
-                                                        ucout << "Error: " << e.what() << std::endl;
-                                                        m_tce.set(false);
-                                                    }
-                                                    catch (const std::exception &e) {
-                                                        ucout << "Error: " << e.what() << std::endl;
-                                                        m_tce.set(false);
-                                                    }
+oauth2_code_listener::oauth2_code_listener(uri listen_uri,
+                                           oauth2_config &config)
+    : m_listener(new http_listener(listen_uri)), m_config(config) {
+  m_listener->support([this](http::http_request request) -> void {
+    if (request.request_uri().path() == U("/") &&
+        request.request_uri().query() != U("")) {
+      m_resplock.lock();
+      try {
+        m_config.token_from_redirected_uri(request.request_uri())
+            .then([this, request](pplx::task<void> token_task) -> void {
+              try {
+                token_task.wait();
+                m_tce.set(true);
+              } catch (const oauth2_exception &e) {
+                ucout << "Error: " << e.what() << std::endl;
+                m_tce.set(false);
+              } catch (const std::exception &e) {
+                ucout << "Error: " << e.what() << std::endl;
+                m_tce.set(false);
+              }
+            });
+        request.reply(status_codes::OK, U("Ok."));
 
-                                                });
-                                        request.reply(status_codes::OK, U("Ok."));
+      } catch (boost::system::system_error &e) {
+        std::cout << boost::diagnostic_information(e) << std::endl
+                  << e.code() << std::endl;
+        std::cout << ERR_error_string(e.code().value(), nullptr) << std::endl;
 
-                                    }catch(boost::system::system_error &e) {
-                                        std::cout << boost::diagnostic_information(e) << std::endl << e.code() << std::endl;
-                                        std::cout << ERR_error_string( e.code().value(), nullptr) << std::endl;
+        request.reply(status_codes::InternalError,
+                      boost::diagnostic_information(e));
+        m_resplock.unlock();
+        return;
+      } catch (std::exception &e) {
+        std::cout << e.what();
+        m_resplock.unlock();
+        return;
+      };
 
-                                        request.reply(status_codes::InternalError, boost::diagnostic_information(e));
-                                        m_resplock.unlock();
-                                        return;
-                                    }catch(std::exception &e){
-                                        std::cout << e.what();
-                                        m_resplock.unlock();
-                                        return;
-                                    }
-                                    ;
-
-                                    m_resplock.unlock();
-                                }
-                                else
-                                {
-                                    std::cout <<request.request_uri().path() <<"\n";
-                                    std::cout <<request.request_uri().query() <<"\n";
-                                    request.reply(status_codes::NotFound, U("Not found."));
-                                }
-                            });
-
-        m_listener->open().wait();
+      m_resplock.unlock();
+    } else {
+      std::cout << request.request_uri().path() << "\n";
+      std::cout << request.request_uri().query() << "\n";
+      request.reply(status_codes::NotFound, U("Not found."));
     }
+  });
 
-oauth2_code_listener::~oauth2_code_listener()
-    {
-        m_listener->close().wait();
-    }
-
-pplx::task<bool> oauth2_code_listener::listen_for_code()
-    {
-        return pplx::create_task(m_tce);
-    }
-
-
-
-void BaseAccount::run(){
-    ucout << "Running gdrive session..." << std::endl;
-
-    if (!m_oauth2_config.token().is_valid_access_token())
-    {
-        if (authorization_code_flow().get())
-        {
-            m_http_config.set_oauth2(m_oauth2_config);
-        }
-        else
-        {
-            ucout << "Authorization failed for gdrive." << std::endl;
-        }
-    }
-
-    run_internal();
+  m_listener->open().wait();
 }
 
-pplx::task<bool> BaseAccount::authorization_code_flow(){
-    open_browser_auth();
-    return m_listener->listen_for_code();
+oauth2_code_listener::~oauth2_code_listener() { m_listener->close().wait(); }
+
+pplx::task<bool> oauth2_code_listener::listen_for_code() {
+  return pplx::create_task(m_tce);
 }
 
-BaseAccount::BaseAccount(std::string dbUri,
-                         std::string api, std::string id, std::string secret,
-                         std::string auth, std::string token, std::string redirect,
-                         std::string scope):
-        m_apiEndpoint(api),
-        m_oauth2_config(id, secret, auth, token, redirect, scope, "test/0.0.1"),
-        m_listener(new oauth2_code_listener(redirect, m_oauth2_config)),
-        m_needToInitialize(true),
-        m_event(1),
-        m_key(id),
-        m_token_expires_at(std::chrono::system_clock::now()),
-        pool(mongocxx::uri(dbUri))
-{};
+void BaseAccount::run() {
+  ucout << "Running gdrive session..." << std::endl;
 
-void BaseAccount::open_browser_auth()
-{
-    auto auth_uri(m_oauth2_config.build_authorization_uri(true));
-    ucout << "Opening browser in URI:" << std::endl;
-    ucout << auth_uri << std::endl;
-    open_browser(auth_uri);
+  if (!m_oauth2_config.token().is_valid_access_token()) {
+    if (authorization_code_flow().get()) {
+      m_http_config.set_oauth2(m_oauth2_config);
+    } else {
+      ucout << "Authorization failed for gdrive." << std::endl;
+    }
+  }
+
+  run_internal();
 }
 
-BaseAccount::~BaseAccount(){
+pplx::task<bool> BaseAccount::authorization_code_flow() {
+  open_browser_auth();
+  return m_listener->listen_for_code();
 }
+
+BaseAccount::BaseAccount(std::string dbUri, std::string api, std::string id,
+                         std::string secret, std::string auth,
+                         std::string token, std::string redirect,
+                         std::string scope)
+    : m_apiEndpoint(api),
+      m_oauth2_config(id, secret, auth, token, redirect, scope, "test/0.0.1"),
+      m_listener(new oauth2_code_listener(redirect, m_oauth2_config)),
+      m_needToInitialize(true), m_event(1), m_key(id),
+      m_token_expires_at(std::chrono::system_clock::now()),
+      pool(mongocxx::uri(dbUri)), refresh_interval(300){};
+
+void BaseAccount::open_browser_auth() {
+  auto auth_uri(m_oauth2_config.build_authorization_uri(true));
+  ucout << "Opening browser in URI:" << std::endl;
+  ucout << auth_uri << std::endl;
+  open_browser(auth_uri);
+}
+
+BaseAccount::~BaseAccount() {}
 
 void BaseAccount::refresh_token(int backoff) {
-    m_event.wait();
-    try {
-        if(std::chrono::system_clock::now() >= m_token_expires_at ) {
-            LOG(INFO) << "Refreshing access tokens";
-            m_oauth2_config.token_from_refresh().get();
-            auto token = m_oauth2_config.token();
-            token.set_refresh_token(m_refresh_token);
-            m_oauth2_config.set_token(token);
-            m_token_expires_at = std::chrono::system_clock::now() + std::chrono::seconds(m_oauth2_config.token().expires_in()) - std::chrono::minutes(2);
-            m_http_config.set_oauth2(m_oauth2_config);
-        }
-    } catch (std::exception &e) {
-        m_event.signal();
-        LOG(ERROR) << "Failed to refresh token";
-        LOG(ERROR) << e.what();
-        unsigned int sleep_time = std::pow(2, backoff);
-        LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
-        sleep(sleep_time);
-        if (backoff <= 6) {
-            refresh_token(backoff + 1);
-        }
-        return;
-
+  m_event.wait();
+  try {
+    if (std::chrono::system_clock::now() >= m_token_expires_at) {
+      LOG(INFO) << "Refreshing access tokens";
+      m_oauth2_config.token_from_refresh().get();
+      auto token = m_oauth2_config.token();
+      token.set_refresh_token(m_refresh_token);
+      m_oauth2_config.set_token(token);
+      m_token_expires_at =
+          std::chrono::system_clock::now() +
+          std::chrono::seconds(m_oauth2_config.token().expires_in()) -
+          std::chrono::minutes(2);
+      m_http_config.set_oauth2(m_oauth2_config);
     }
+  } catch (std::exception &e) {
     m_event.signal();
-
-
+    LOG(ERROR) << "Failed to refresh token";
+    LOG(ERROR) << e.what();
+    unsigned int sleep_time = std::pow(2, backoff);
+    LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+    sleep(sleep_time);
+    if (backoff <= 6) {
+      refresh_token(backoff + 1);
+    }
+    return;
+  }
+  m_event.signal();
 }
