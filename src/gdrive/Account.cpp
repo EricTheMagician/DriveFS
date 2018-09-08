@@ -674,7 +674,7 @@ void Account::getFilesAndFolders(std::string nextPageToken,
         getRootFolder();
     }
 
-    uriBuilder.append_query("pageSize", "500");
+    uriBuilder.append_query("pageSize", "1000");
     uriBuilder.append_query("includeTeamDriveItems", "true");
     uriBuilder.append_query("includeCorpusRemovals", "true");
     uriBuilder.append_query("supportsTeamDrives", "true");
