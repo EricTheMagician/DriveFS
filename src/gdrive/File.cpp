@@ -443,7 +443,7 @@ namespace DriveFS{
         }
     }
 
-    void _Object::trash(GDriveObject file){
+    void _Object::trash(const GDriveObject &file){
         if(!file)
             return;
         file->trash();
