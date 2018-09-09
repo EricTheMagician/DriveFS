@@ -55,7 +55,7 @@ namespace DriveFS{
     std::map<ino_t, GDriveObject> _Object::inodeToObject;
     std::map<std::string, GDriveObject> _Object::idToObject;
     PriorityCache<GDriveObject>_Object::cache = PriorityCache<GDriveObject>(1,1);
-
+    ::AutoResetEvent _Object::insertEvent(1);
 
     _Object::_Object():File(), isUploaded(false){
     }
@@ -433,8 +433,10 @@ namespace DriveFS{
 
     void _Object::trash(){
         if(lookupCount.load(std::memory_order_acquire) == 0){
+            insertEvent.wait();
             _Object::inodeToObject.erase(attribute.st_ino);
             _Object::idToObject.erase(m_id);
+            insertEvent.signal();
         }
         trashed = true;
 

@@ -928,8 +928,7 @@ GDriveObject Account::createNewChild(GDriveObject parent, const char *name,
   }
 
   auto o = std::make_shared<_Object>(std::move(obj));
-  _Object::idToObject[o->getId()] = o;
-  _Object::inodeToObject[o->attribute.st_ino] = o;
+  _Object::insertObjectToMemoryMap(o);
   parent->addChild(o);
   o->addParent(parent);
 

@@ -35,8 +35,22 @@ namespace DriveFS {
     public:
         static std::map<ino_t, GDriveObject> inodeToObject;
         static std::map<std::string, GDriveObject> idToObject;
+        static AutoResetEvent insertEvent;
         static GDriveObject buildTeamDriveHolder(ino_t ino, GDriveObject root);
         static GDriveObject buildTeamDrive(ino_t ino, bsoncxx::document::view document, GDriveObject parent);
+        static void insertObjectToMemoryMap(const GDriveObject &object){
+            insertEvent.wait();
+            auto file = object.get();
+            try{
+                inodeToObject[file->attribute.st_ino] = object;
+                idToObject[file->getId()] = object;
+            }catch(std::exception &e){
+                LOG(ERROR) << "There was an error with inserting an object to the memory database: " << e.what()
+                           << "\nExiting because it is probably in a broken state if we were to continue";                           
+            }
+            insertEvent.signal();
+
+        }
         inline const std::string& getName() const{return m_name;}
         inline const std::string& getId() const{return m_id;}
         inline bool getIsFolder() const {return isFolder;};
