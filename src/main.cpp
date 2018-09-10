@@ -31,7 +31,7 @@ int main(int argc, char **argv)
             ("move-to-download", po::value<bool>()->default_value(true), "move a uploaded file to the download cache")
             ("max-concurrent-downloads", po::value<int>(),  max_download.c_str())
             ("max-concurrent-uploads", po::value<int>(), max_upload.c_str())
-            ("refresh_interval", po::value<int>()->default_value(300), "refresh interval in seconds")
+            ("refresh-interval", po::value<int>()->default_value(300), "refresh interval in seconds")
             ;
 
     fuse_desc.add_options()
@@ -43,7 +43,7 @@ int main(int argc, char **argv)
             ;
 
     log_desc.add_options()
-            ("log-location", po::value<std::string>()->default_value("/tmp/DriveFS.log"), "sets the location for the log file")
+            ("log-locatixon", po::value<std::string>()->default_value("/tmp/DriveFS.log"), "sets the location for the log file")
             ("log-max-size", po::value<std::string>()->default_value("104857600"),"sets the maximum log size, in bytes. default is 100M")
             ("log-verbose,v", po::value<int>()->implicit_value(9), "log verbosee. if no  value is passed, log maximum verbose. valid values: [0-9]")
             ;
@@ -254,7 +254,8 @@ int main(int argc, char **argv)
     fuse_args.push_back(s_mountpoint.c_str());
 
     struct fuse_args args = FUSE_ARGS_INIT((int)fuse_args.size(), (char **)fuse_args.data());
-    struct fuse_lowlevel_ops ops = DriveFS::Filesystem::getOps({});
+    // struct fuse_lowlevel_ops ops = DriveFS::Filesystem::getOps({});
+    struct fuse_lowlevel_ops ops = DriveFS::getOps({});
 
 #if FUSE_USE_VERSION >= 30
     struct fuse_cmdline_opts opts;
