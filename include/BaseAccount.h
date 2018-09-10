@@ -10,6 +10,13 @@
 #include <mongocxx/client.hpp>
 #include <mongocxx/pool.hpp>
 
+#if FUSE_USE_VERSION >= 30
+#include <fuse3/fuse_lowlevel.h>
+#else
+#include <fuse/fuse_lowlevel.h>
+#endif
+
+
 using namespace utility;
 using namespace web;
 using namespace web::http;
@@ -17,7 +24,8 @@ using namespace web::http::client;
 using namespace web::http::oauth2::experimental;
 using namespace web::http::experimental::listener;
 
-class oauth2_code_listener {
+class oauth2_code_listener
+{
 public:
   oauth2_code_listener(uri listen_uri, oauth2_config &config);
   ~oauth2_code_listener();
@@ -30,7 +38,8 @@ private:
   std::mutex m_resplock;
 };
 
-class BaseAccount {
+class BaseAccount
+{
 
 public:
   BaseAccount(std::string dbUri, std::string api, std::string id,
@@ -39,35 +48,52 @@ public:
   virtual ~BaseAccount();
   void run();
   inline bool needToInitialize() const { return m_needToInitialize; }
-  inline http_client getClient() {
+  inline http_client getClient()
+  {
     refresh_token();
     return http_client(m_apiEndpoint, m_http_config);
   }
 
-  inline http_client getClient(int timeout_in_seconds) {
+  inline http_client getClient(int timeout_in_seconds)
+  {
     refresh_token();
     auto config = m_http_config;
     config.set_timeout(std::chrono::seconds(timeout_in_seconds));
     return http_client(m_apiEndpoint, config);
   }
 
-  inline struct fuse_session *getFuseSession() const { return m_fuse_session; }
-  inline void setFuseSession(struct fuse_session *session) {
-    m_fuse_session = session;
-  }
+  // inline struct fuse_session *getFuseSession() const { return m_fuse_session; }
+  // inline void setFuseSession(struct fuse_session *session)
+  // {
+  //   m_fuse_session = session;
+  // }
 
-  struct fuse_session *fuse_session;
-  inline ino_t getNextInode() {
+  inline ino_t getNextInode()
+  {
     return inode_count.fetch_add(1, std::memory_order_acquire) + 1;
   }
 
-  inline void setRefreshInterval(int interval_in_seconds) {
+  inline void setRefreshInterval(int interval_in_seconds)
+  {
     this->refresh_interval = interval_in_seconds;
   }
 
 #if FUSE_USE_VERSION < 30
   struct fuse_chan *fuse_channel;
 #endif
+  struct fuse_session *fuse_session;
+
+
+  void inline invalidateInode(ino_t inode)
+  {
+#if FUSE_USE_VERSION >= 30
+    fuse_lowlevel_notify_inval_inode(
+        this->fuse_session, inode, 0, 0);
+#else
+    fuse_lowlevel_notify_inval_inode(
+        this->fuse_channel, inode, 0, 0);
+#endif
+  }
 
 private:
   void open_browser_auth();
@@ -88,7 +114,6 @@ protected:
   std::chrono::system_clock::time_point m_token_expires_at;
   std::atomic<ino_t> inode_count = 1;
   int refresh_interval = 300;
-  struct fuse_session *m_fuse_session;
   bool m_needToInitialize;
 
 public:

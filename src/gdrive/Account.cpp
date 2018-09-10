@@ -212,7 +212,9 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
                   hasItemsToDelete = true;
                   auto file = _Object::idToObject.find(fileId);
                   if (file != _Object::idToObject.cend()) {
-                    _Object::trash(file->second);
+                    if(file->second){
+                      _Object::trash(file->second);
+                    }
                   }
                 }
               }
@@ -264,6 +266,7 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
                   parent = cursor->second;
                   parent->removeChild(file);
                   file->removeParent(parent);
+                  this->invalidateInode(parent->attribute.st_ino);
                 } // if it't not already present, it probably means we already
                   // removed it locally and the background update is now
                   // syncing.
@@ -292,36 +295,14 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
                   GDriveObject parent = cursor->second;
                   parent->addChild(file);
                   file->addParent(parent);
-#if FUSE_USE_VERSION >= 30
-                  fuse_lowlevel_notify_inval_inode(
-                      this->fuse_session, parent->attribute.st_ino, 0, 0);
-#else
-                  fuse_lowlevel_notify_inval_inode(
-                      this->fuse_channel, parent->attribute.st_ino, 0, 0);
-#endif
+                  this->invalidateInode(parent->attribute.st_ino);
                 }
               }
             }
 
-            // invalidate old parents
-            for (const auto &parent : oldParents) {
-#if FUSE_USE_VERSION >= 30
-              fuse_lowlevel_notify_inval_inode(this->fuse_session,
-                                               parent->attribute.st_ino, 0, 0);
-#else
-              fuse_lowlevel_notify_inval_inode(this->fuse_channel,
-                                               parent->attribute.st_ino, 0, 0);
-#endif
-            }
-
             // notify the kernel that the inode is invalid.
-#if FUSE_USE_VERSION >= 30
-            fuse_lowlevel_notify_inval_inode(this->fuse_session,
-                                             file->attribute.st_ino, -1, 0);
-#else
-            fuse_lowlevel_notify_inval_inode(this->fuse_channel,
-                                             file->attribute.st_ino, -1, 0);
-#endif
+            this->invalidateInode(file->attribute.st_ino);
+
           } else {
             auto inode =
                 inode_count.fetch_add(1, std::memory_order_acquire) + 1;
