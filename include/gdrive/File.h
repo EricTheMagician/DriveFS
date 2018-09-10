@@ -30,7 +30,7 @@ namespace DriveFS {
         _Object(ino_t ino, const std::string &id, const char *name, mode_t mode, bool isFile);
         _Object(const DriveFS::_Object&);
         _Object(DriveFS::_Object&&);
-        ~_Object();
+        virtual ~_Object();
         static PriorityCache<GDriveObject> cache;
     public:
         static std::map<ino_t, GDriveObject> inodeToObject;
@@ -68,7 +68,7 @@ namespace DriveFS {
         inline void setIsUploaded(bool status) {isUploaded = status;}
         inline bool getIsTrashed() const {return trashed; }
         void trash();
-        static void trash(const GDriveObject &file);
+        static void trash(GDriveObject file);
         std::string md5() const { return md5Checksum; };
         GDriveObject findChildByName( const char *name) const ;
         bsoncxx::document::value to_bson(bool includeId=true) const;
