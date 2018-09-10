@@ -169,7 +169,7 @@ int main(int argc, char **argv)
 
     DriveFS::Account account = DriveFS::Account::getAccount(
         vm["database"].as<std::string>());
-    account.setRefreshInterval(vm["refresh_interval"].as<int>());
+    account.setRefreshInterval(vm["refresh-interval"].as<int>());
     DriveFS::FileIO::setAccount(&account);
     DriveFS::FileIO::maxCacheOnDisk = vm["cache-disk-size"].as<size_t>() * 1024 * 1024;
     if (account.needToInitialize())
