@@ -212,7 +212,7 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
                   hasItemsToDelete = true;
                   auto file = _Object::idToObject.find(fileId);
                   if (file != _Object::idToObject.cend()) {
-                    if(file->second){
+                    if (file->second) {
                       _Object::trash(file->second);
                     }
                   }
@@ -291,40 +291,37 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
               }
               if (need_to_set) {
                 auto cursor = DriveFS::_Object::idToObject.find(s_parentId);
-                if (cursor != DriveFS::_Object::idToObject.cend()) {
+                if (cursor != DriveFS::_Object::idToObject.end()) {
                   GDriveObject parent = cursor->second;
                   parent->addChild(file);
                   file->addParent(parent);
                   this->invalidateInode(parent->attribute.st_ino);
+                  this->invalidateParentEntry(parent);
                 }
               }
             }
 
             // notify the kernel that the inode is invalid.
             this->invalidateInode(file->attribute.st_ino);
-
+            this->invalidateParentEntry(file);
           } else {
-            auto inode =
-                inode_count.fetch_add(1, std::memory_order_acquire) + 1;
+            auto inode = getNextInode();
             auto file = std::make_shared<DriveFS::_Object>(inode, fileDoc);
 
             if (file->getName().find('/') != std::string::npos) {
+              LOG(WARNING) << "Found a file with a slash in it's name. It is "
+                              "not a valid linux name. Not inserting \""
+                           << file->getName() << "\" to the filesystem";
               continue;
             }
 
-            _Object::idToObject[file->getId()] = file;
-            _Object::inodeToObject[inode] = file;
+            _Object::insertObjectToMemoryMap(file);
 
             for (auto &p : file->parents) {
               p->addChild(file);
               file->addParent(p);
-#if FUSE_USE_VERSION >= 30
-              fuse_lowlevel_notify_inval_inode(this->fuse_session,
-                                               p->attribute.st_ino, 0, 0);
-#else
-              fuse_lowlevel_notify_inval_inode(this->fuse_channel,
-                                               p->attribute.st_ino, 0, 0);
-#endif
+              this->invalidateInode(p->attribute.st_ino);
+              this->invalidateParentEntry(p);
             }
           }
         }
@@ -371,14 +368,18 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
 
     if (teamDriveId.empty()) {
 
-      for (auto item : this->m_newStartPageToken) {
+      for (auto &item : this->m_newStartPageToken) {
         if (!item.first.empty()) {
-          skip_sleep = true;
+          background_update(item.first, true);
           continue;
         }
       }
       skip_sleep = false;
       continue;
+    } else {
+      // return only if the teamdrive id is not root. ie only the root folder
+      // should be in the loop.
+      return;
     }
   }
 }
@@ -396,6 +397,9 @@ void Account::linkParentsAndChildren() {
 
   for (auto doc : cursor) {
     std::string child = doc["id"].get_utf8().value.to_string();
+    if (child == "1Ez8abTySPQPbw9TNXqVEm8yJ5YxOzmSh") {
+      printf(" ");
+    }
     auto found = DriveFS::_Object::idToObject.find(child);
     if (found != DriveFS::_Object::idToObject.end()) {
       bsoncxx::array::view parents = doc["parents"].get_array();
@@ -409,6 +413,8 @@ void Account::linkParentsAndChildren() {
       }
     }
   }
+
+  LOG(TRACE) << "Finished linking parent and children";
 }
 
 void Account::loadFilesAndFolders() {
@@ -458,6 +464,25 @@ void Account::loadFilesAndFolders() {
       if (io->validateCachedFileForUpload(true)) {
         auto p = doc["parents"].get_array().value;
         if (p.empty()) {
+          delete io;
+          toDelete << object->getId();
+          hasItemsToDelete = true;
+          continue;
+        }
+
+        auto const gid = object->getId();
+        auto found = _Object::idToObject.find(gid);
+        if (found != _Object::idToObject.end()) {
+          delete io;
+          LOG(ERROR) << "Found an un-uploaded object that appeared more than "
+                        "once in the DB.";
+          if (found->second->getIsUploaded()) {
+            LOG(TRACE) << "Deleting it from the DB since the other one is "
+                          "already uploaded";
+            db.delete_one(doc);
+            continue;
+          }
+          LOG(ERROR) << bsoncxx::to_json(doc);
           continue;
         }
 
@@ -833,7 +858,17 @@ void Account::generateIds(int_fast8_t backoff) {
   builder.append_query("space=drive");
   builder.append_query("fields=ids");
 
-  http_response resp = client.request(methods::GET, builder.to_string()).get();
+  http_response resp;
+  try {
+    resp = client.request(methods::GET, builder.to_string()).get();
+  } catch (std::exception &e) {
+    LOG(ERROR) << "Failed to generate Ids: " << e.what();
+    unsigned int sleep_time = std::pow(2, backoff);
+    LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+    sleep(sleep_time);
+    generateIds(backoff + 1);
+    return;
+  }
   if (resp.status_code() != 200) {
     LOG(ERROR) << "Failed to generate Ids: " << resp.reason_phrase();
     LOG(ERROR) << resp.extract_json(true).get();
@@ -1232,8 +1267,16 @@ std::optional<int64_t> Account::getResumableUploadPoint(std::string url,
   std::stringstream ss;
   ss << "bytes */" << fileSize;
   headers.add("Content-Range", ss.str());
-
-  http_response response = client.request(request).get();
+  http_response response;
+  try {
+    response = client.request(request).get();
+  } catch (std::exception &e) {
+    LOG(ERROR) << "There was an error resumeable upload link.";
+    int time = pow(2, backoff);
+    LOG(ERROR) << "Sleeping for " << time << " seconds.";
+    sleep(time);
+    return getResumableUploadPoint(url, fileSize, backoff + 1);
+  }
   int status_code = response.status_code();
   if (status_code == 404) {
     return std::nullopt;

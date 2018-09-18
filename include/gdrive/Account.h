@@ -32,8 +32,10 @@ using bsoncxx::builder::stream::open_array;
 using bsoncxx::builder::stream::open_document;
 #define GDRIVE_OAUTH_SCOPE "https://www.googleapis.com/auth/drive"
 
-namespace DriveFS {
-class Account : public BaseAccount {
+namespace DriveFS
+{
+class Account : public BaseAccount
+{
 public:
   Account(std::string dbUri);
 
@@ -42,7 +44,8 @@ public:
 
   static Account getAccount(std::string uri);
 
-  inline void refresh_token(int backoff = 0) {
+  inline void refresh_token(int backoff = 0)
+  {
     //            m_id_buffer.clear();
     BaseAccount::refresh_token(backoff);
   };
@@ -86,12 +89,20 @@ private:
   virtual void background_update(std::string teamDriveId = "",
                                  bool skip_sleep = false);
   bsoncxx::document::value getRootFolder();
+  void invalidateParentEntry(const GDriveObject &obj)
+  {
+    for (auto parent : obj->parents)
+    {
+      this->invalidateEntry(parent->attribute.st_ino, obj->getName());
+    }
+  };
 
   boost::circular_buffer<std::string> m_id_buffer;
 
   std::map<std::string, std::string>
       m_newStartPageToken; // map teamDriveId to newStartPageToken
 };
+
 }; // namespace DriveFS
 
 constexpr std::string_view DATABASEDATA = "GDriveData";

@@ -28,7 +28,7 @@ public:
         memset(&attribute, 0, sizeof(struct stat));
     }
 
-    ~File(){
+    virtual ~File(){
         m_event.signal();
         if(m_buffers != nullptr){
             delete m_buffers;

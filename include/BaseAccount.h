@@ -16,7 +16,6 @@
 #include <fuse/fuse_lowlevel.h>
 #endif
 
-
 using namespace utility;
 using namespace web;
 using namespace web::http;
@@ -62,8 +61,8 @@ public:
     return http_client(m_apiEndpoint, config);
   }
 
-  // inline struct fuse_session *getFuseSession() const { return m_fuse_session; }
-  // inline void setFuseSession(struct fuse_session *session)
+  // inline struct fuse_session *getFuseSession() const { return m_fuse_session;
+  // } inline void setFuseSession(struct fuse_session *session)
   // {
   //   m_fuse_session = session;
   // }
@@ -83,18 +82,22 @@ public:
 #endif
   struct fuse_session *fuse_session;
 
-
   void inline invalidateInode(ino_t inode)
   {
 #if FUSE_USE_VERSION >= 30
-    fuse_lowlevel_notify_inval_inode(
-        this->fuse_session, inode, 0, 0);
+    fuse_lowlevel_notify_inval_inode(this->fuse_session, inode, 0, 0);
 #else
-    fuse_lowlevel_notify_inval_inode(
-        this->fuse_channel, inode, 0, 0);
+    fuse_lowlevel_notify_inval_inode(this->fuse_channel, inode, 0, 0);
 #endif
   }
-
+  void inline invalidateEntry(ino_t parent_inode, const std::string &name)
+  {
+#if FUSE_USE_VERSION >= 30
+    fuse_lowlevel_notify_inval_entry(this->fuse_session, parent_inode, name.c_str(), name.size());
+#else
+    fuse_lowlevel_notify_inval_entry(this->fuse_channel, parent_inode, name.c_str(), name.size());
+#endif
+  }
 private:
   void open_browser_auth();
 
