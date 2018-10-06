@@ -254,8 +254,8 @@ int main(int argc, char **argv)
     fuse_args.push_back(s_mountpoint.c_str());
 
     struct fuse_args args = FUSE_ARGS_INIT((int)fuse_args.size(), (char **)fuse_args.data());
-    // struct fuse_lowlevel_ops ops = DriveFS::Filesystem::getOps({});
-    struct fuse_lowlevel_ops ops = DriveFS::getOps({});
+    struct fuse_lowlevel_ops ops = DriveFS::Filesystem::getOps();
+    // struct fuse_lowlevel_ops ops = DriveFS::getOps({});
 
 #if FUSE_USE_VERSION >= 30
     struct fuse_cmdline_opts opts;
