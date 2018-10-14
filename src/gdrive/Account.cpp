@@ -167,8 +167,9 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
       }
       mongocxx::bulk_write documents;
       bsoncxx::document::value doc =
-          bsoncxx::from_json(response.extract_utf8string().get());
+      bsoncxx::from_json(response.extract_utf8string().get());
       bsoncxx::document::view value = doc.view();
+
       // get next page token
       bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
       if (nextPageTokenField) {
@@ -214,11 +215,16 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
                   if (file != _Object::idToObject.cend()) {
                     if (file->second) {
                       _Object::trash(file->second);
+                      for(auto &parent: file->second->parents){
+                        this->invalidateParentEntry(file->second);
+                      }
+
                     }
                   }
                 }
               }
             }
+            
             continue;
           }
 
@@ -316,13 +322,17 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
             }
 
             _Object::insertObjectToMemoryMap(file);
-
-            for (auto &p : file->parents) {
-              p->addChild(file);
-              file->addParent(p);
-              this->invalidateInode(p->attribute.st_ino);
-              this->invalidateParentEntry(p);
+            bsoncxx::array::view parents = fileDoc.view()["parents"].get_array();
+            for (auto parentId : parents) {
+              auto it = DriveFS::_Object::idToObject.find(
+                  parentId.get_utf8().value.to_string());
+              if (it != DriveFS::_Object::idToObject.end()) {
+                it->second->addChild(file);
+                file->addParent(it->second);
+                this->invalidateInode(it->second->attribute.st_ino);
+              }
             }
+
           }
         }
       }
