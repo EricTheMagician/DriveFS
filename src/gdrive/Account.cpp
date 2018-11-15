@@ -448,8 +448,13 @@ void Account::loadFilesAndFolders() {
     root = DriveFS::_Object::buildRoot(getRootFolder());
   }
 
-  auto cursor = db.find(document{} << "parents" << open_document << "$exists"
-                                   << 1 << close_document << finalize);
+  // select files with at least one parent.
+  auto cursor =
+      db.find(document{} << "$nor" << open_array << 
+      open_document << "parents" << open_document << "$exists" << 0 << close_document << close_document <<
+      open_document << "parents" << open_document << "$size" << 0 << close_document << close_document  
+                         << close_array
+                         << finalize);
   mongocxx::bulk_write documents;
   bsoncxx::builder::stream::array toDelete;
   bool hasItemsToDelete = false;
