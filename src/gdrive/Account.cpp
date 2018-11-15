@@ -1205,6 +1205,12 @@ std::string Account::getUploadUrlForFile(http_request req, int backoff) {
 bool Account::upload(std::string uploadUrl, std::string filePath,
                      size_t fileSize, int64_t start, std::string mimeType) {
   refresh_token();
+  boost::system::error_code ec;
+  if( fs::exists(filePath, ec) || ec){
+    // the file no longer exists, stop trying to upload
+    return true;
+  }
+
   try {
     concurrency::streams::basic_istream<unsigned char> stream =
         concurrency::streams::file_stream<unsigned char>::open_istream(
