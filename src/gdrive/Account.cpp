@@ -392,6 +392,7 @@ void Account::background_update(std::string teamDriveId) {
         }
       }
       if (teamDriveId.empty()) {
+        LOG(INFO) << "Finished checking for changes.\nSleeping for " << this->refresh_interval << " seconds.";
         sleep(this->refresh_interval);
       }
 
