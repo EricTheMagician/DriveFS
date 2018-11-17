@@ -73,13 +73,12 @@ public:
 protected:
   void run_internal() override;
   virtual void loadFilesAndFolders() override;
-  virtual void getFilesAndFolders(std::string nextPageToken = "",
-                                  std::string teamDriveID = "",
-                                  int backoff = 0);
+  [[nodiscard]] virtual std::string getFilesAndFolders(std::string nextPageToken = "",
+                                  int backoff = 0,
+                                  std::string teamDriveId="");
 
 private:
-  void parseFilesAndFolders(bsoncxx::document::view value,
-                            std::string teamDriveId, bool notify_fs = true);
+  void parseFilesAndFolders(bsoncxx::document::view value);
   void getTeamDrives(int backoff = 0);
   void linkParentsAndChildren();
   std::string getUploadUrlForFile(http_request, int backoff = 1);

@@ -5,6 +5,7 @@
 #include "gdrive/Account.h"
 #include "BaseFileSystem.h"
 #include <boost/asio/thread_pool.hpp>
+#include <boost/asio.hpp>
 #include <cpprest/filestream.h>
 #include <easylogging++.h>
 #include <gdrive/File.h>
@@ -20,7 +21,7 @@ using namespace bsoncxx::builder;
 
 static mongocxx::options::update upsert;
 static mongocxx::options::find_one_and_update find_and_upsert;
-
+static boost::asio::thread_pool *parseFilesAndFolderThreadPool;
 namespace DriveFS {
 
 Account::Account(std::string dbUri)
@@ -58,6 +59,8 @@ Account::Account(std::string dbUri)
       }
     }
   }
+
+
 }
 
 Account::Account(std::string dbUri, const std::string &at,
@@ -75,8 +78,19 @@ Account::Account(std::string dbUri, const std::string &at,
   refresh_token();
   m_http_config.set_oauth2(m_oauth2_config);
   m_needToInitialize = false;
-  getFilesAndFolders();
+  if (m_newStartPageToken.size() == 0) {
+    std::string nextPageToken = "";
+    parseFilesAndFolderThreadPool = new boost::asio::thread_pool(4); 
+    do{
+      nextPageToken=getFilesAndFolders(nextPageToken);
+    }while(!nextPageToken.empty());
+    getTeamDrives();
+    parseFilesAndFolderThreadPool->join();
+    delete parseFilesAndFolderThreadPool;
+    parseFilesAndFolderThreadPool = nullptr;
+  }
   loadFilesAndFolders();
+
   SFAsync(&Account::background_update, this, std::string(""), false);
 }
 
@@ -97,7 +111,6 @@ void Account::run_internal() {
       options);
   m_refresh_token = token.refresh_token();
 
-  getFilesAndFolders();
   SFAsync(&Account::background_update, this, std::string(""), false);
 }
 
@@ -130,6 +143,8 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
   while (true) {
     try {
       if (!skip_sleep || teamDriveId.empty()) {
+        LOG(DEBUG) << "Sleeping for " << this->refresh_interval << " seconds";
+        this->refresh_interval = 10;
         sleep(this->refresh_interval);
       }
       refresh_token();
@@ -144,12 +159,14 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
         LOG(INFO) << "Getting updated list of files and folders for root "
                      "folder with token "
                   << pageToken;
+        uriBuilder.append_query("includeTeamDriveItems", "false");
       } else {
         LOG(INFO) << "Getting updated list of files and folders for folder "
                   << teamDriveId << " and token " << pageToken;
         uriBuilder.append_query("teamDriveId", teamDriveId);
+        uriBuilder.append_query("includeTeamDriveItems", "true");
       }
-      uriBuilder.append_query("includeTeamDriveItems", "true");
+      uriBuilder.append_query("restrictToMyDrive", "true");
       uriBuilder.append_query("pageToken", pageToken);
       uriBuilder.append_query("pageSize", 1000);
       uriBuilder.append_query("supportsTeamDrives", "true");
@@ -205,7 +222,7 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
             auto deleted = view["removed"];
             if (deleted) {
               if (deleted.get_bool().value) {
-                LOG(DEBUG) << bsoncxx::to_json(doc);
+                // LOG(DEBUG) << bsoncxx::to_json(doc);
                 if (view["fileId"]) {
                   std::string fileId =
                       view["fileId"].get_utf8().value.to_string();
@@ -215,10 +232,9 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
                   if (file != _Object::idToObject.cend()) {
                     if (file->second) {
                       _Object::trash(file->second);
-                      for(auto &parent: file->second->parents){
+                      for (const auto &parent : file->second->parents) {
                         this->invalidateParentEntry(file->second);
                       }
-
                     }
                   }
                 }
@@ -332,7 +348,6 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
                 this->invalidateInode(it->second->attribute.st_ino);
               }
             }
-
           }
         }
       }
@@ -450,11 +465,11 @@ void Account::loadFilesAndFolders() {
 
   // select files with at least one parent.
   auto cursor =
-      db.find(document{} << "$nor" << open_array << 
-      open_document << "parents" << open_document << "$exists" << 0 << close_document << close_document <<
-      open_document << "parents" << open_document << "$size" << 0 << close_document << close_document  
-                         << close_array
-                         << finalize);
+      db.find(document{} << "$nor" << open_array << open_document << "parents"
+                         << open_document << "$exists" << 0 << close_document
+                         << close_document << open_document << "parents"
+                         << open_document << "$size" << 0 << close_document
+                         << close_document << close_array << finalize);
   mongocxx::bulk_write documents;
   bsoncxx::builder::stream::array toDelete;
   bool hasItemsToDelete = false;
@@ -593,52 +608,50 @@ void Account::loadFilesAndFolders() {
   linkParentsAndChildren();
 }
 
-void Account::getFilesAndFolders(std::string nextPageToken,
-                                 std::string teamDriveId, int backoff) {
+std::string Account::getFilesAndFolders(std::string nextPageToken,
+                                 int backoff, 
+                                 std::string teamDriveId) {
 
   refresh_token();
-  LOG(INFO) << "Getting updated list of files and folders";
-  LOG(DEBUG) << "teamDriveId " << (teamDriveId.empty() ? "root" : teamDriveId)
-             << " and token " << nextPageToken;
+  if(teamDriveId.empty()){
+    LOG(INFO) << "Getting current list of files and folders with token: "<< nextPageToken;
+  }else{
+    LOG(INFO) << "Getting team drive "<<teamDriveId << " list of files and folders with token: "<< nextPageToken;
+  }
 
-  http_client client(m_apiEndpoint, m_http_config);
-  uri_builder uriBuilder("changes");
+  http_client aClient(m_apiEndpoint, m_http_config);
+  uri_builder uriBuilder("files");
+
   if (nextPageToken.length() > 0) {
     uriBuilder.append_query("pageToken", nextPageToken);
-  } else if (m_newStartPageToken.size() > 0) {
-    auto found = m_newStartPageToken.find(teamDriveId);
-    if (found != m_newStartPageToken.cend()) {
-      uriBuilder.append_query("pageToken", found->second);
-    } else {
-      uriBuilder.append_query("pageToken", "1");
-    }
-  } else {
-    uriBuilder.append_query("pageToken", "1");
+  } else if(teamDriveId.empty()){
     // get root metadata
     getRootFolder();
   }
 
-  uriBuilder.append_query("pageSize", "1000");
-  uriBuilder.append_query("includeTeamDriveItems", "true");
-  uriBuilder.append_query("includeCorpusRemovals", "true");
+  if(teamDriveId.empty()){
+    uriBuilder.append_query("corpora", "user");
+    uriBuilder.append_query("includeTeamDriveItems", "false");
+    uriBuilder.append_query("q", "'me' in owners");
+
+  }else{
+    uriBuilder.append_query("corpora", "teamDrive");
+    uriBuilder.append_query("teamDriveId", teamDriveId);
+    uriBuilder.append_query("includeTeamDriveItems", "true");
+  }
+  uriBuilder.append_query("pageSize", "999");
   uriBuilder.append_query("supportsTeamDrives", "true");
   //        uriBuilder.append_query("spaces", "drive");
-  uriBuilder.append_query("fields", "changes,nextPageToken,newStartPageToken");
-  if (!teamDriveId.empty()) {
-    uriBuilder.append_query("teamDriveId", teamDriveId);
-  }
+  uriBuilder.append_query("fields", "files,nextPageToken");
 
-  auto response = client.request(methods::GET, uriBuilder.to_string()).get();
+  auto response = aClient.request(methods::GET, uriBuilder.to_string()).get();
   if (response.status_code() != 200) {
     LOG(ERROR) << "Failed to get changes: " << response.reason_phrase();
     LOG(ERROR) << response.extract_json(true).get();
     unsigned int sleep_time = std::pow(2, backoff);
     LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
     sleep(sleep_time);
-    if (backoff <= 5) {
-      getFilesAndFolders(nextPageToken, teamDriveId, backoff + 1);
-    }
-    return;
+    return getFilesAndFolders(nextPageToken, backoff > 5? backoff: backoff + 1);
   }
   bsoncxx::document::value doc =
       bsoncxx::from_json(response.extract_utf8string().get());
@@ -648,67 +661,77 @@ void Account::getFilesAndFolders(std::string nextPageToken,
 
   // get next page token
   bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
+  nextPageToken = nextPageTokenField ? nextPageTokenField.get_utf8().value.to_string() : "";
 
-  // get new start page token
-  bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
-  if (nextPageTokenField) {
-    m_newStartPageToken[teamDriveId] =
-        nextPageTokenField.get_utf8().value.to_string();
-  } else if (newStartPageToken) {
-    m_newStartPageToken[teamDriveId] =
-        newStartPageToken.get_utf8().value.to_string();
-  }
+  // // get new start page token
+  // bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
+  // if (nextPageTokenField) {
+  //   m_newStartPageToken[teamDriveId] =
+  //       nextPageTokenField.get_utf8().value.to_string();
+  // } else if (newStartPageToken) {
+  //   m_newStartPageToken[teamDriveId] =
+  //       newStartPageToken.get_utf8().value.to_string();
+  // }
+  boost::asio::defer(*parseFilesAndFolderThreadPool,
+                      [docToParse = std::move(doc), this]() -> void {
+                        this->parseFilesAndFolders(docToParse);
+                      });
 
-  parseFilesAndFolders(value, teamDriveId, false);
-
+ 
   // parse files
-  if (nextPageTokenField) {
-    getFilesAndFolders(nextPageTokenField.get_utf8().value.to_string(),
-                       teamDriveId);
+  if (!nextPageToken.empty()) {
+    return nextPageToken;
   } else {
-    if (teamDriveId.empty()) {
-      getTeamDrives();
-    };
+      mongocxx::pool::entry conn = pool.acquire();
+      mongocxx::database db_client = conn->database(std::string(DATABASENAME));
+      mongocxx::collection settings = db_client[std::string(DATABASESETTINGS)];
+      uri_builder uriBuilder_change_token("changes/startPageToken");
+      if(!teamDriveId.empty()){
+        uriBuilder_change_token.append_query("supportsTeamDrives", "true");
+        uriBuilder_change_token.append_query("teamDriveId", teamDriveId);
+      }
+      http_response resp = aClient.request(methods::GET, uriBuilder_change_token.to_string()).get();
+      bsoncxx::document::value changeDoc =
+          bsoncxx::from_json(resp.extract_utf8string().get());
+      bsoncxx::document::view changeValue = changeDoc.view();
+
+      bool needs_updating = false;
+
+      // get next page token
+      bsoncxx::document::element startPageToken = changeValue["startPageToken"];
+      std::string newStartPageToken = startPageToken.get_utf8().value.to_string();
+      m_newStartPageToken[teamDriveId.empty()?"root": teamDriveId] = newStartPageToken;
+      settings.find_one_and_update(
+      document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
+                  << (teamDriveId.empty() ? "root" : teamDriveId) << finalize,
+      document{} << "$set" << open_document << "value"
+                  << newStartPageToken << close_document
+                  << finalize,
+      find_and_upsert
+      );
+
+    return "";
   }
 }
 
-void Account::parseFilesAndFolders(bsoncxx::document::view value,
-                                   std::string teamDriveId,
-                                   bool notify_filesystem) {
+void Account::parseFilesAndFolders(bsoncxx::document::view value) {
   bool needs_updating = false;
   mongocxx::bulk_write documents;
 
-  auto eleChanges = value["changes"];
+  auto eleFiles = value["files"];
   auto toDelete = bsoncxx::builder::basic::array{};
-  bool hasItemsToDelete = false;
-  if (eleChanges) {
-    bsoncxx::array::view changes = eleChanges.get_array().value;
+  if (eleFiles) {
+    bsoncxx::array::view files = eleFiles.get_array().value;
     int count = 0;
-    for (const auto &change : changes) {
-      auto doc = change.get_document();
-      auto view = doc.view();
-      auto file = view["file"];
-      if (!file) {
-        auto deleted = view["removed"];
-        if (deleted) {
-          if (deleted.get_bool().value) {
-            LOG(DEBUG) << bsoncxx::to_json(doc);
-            if (view["fileId"]) {
-              toDelete.append(view["fileId"].get_utf8());
-              hasItemsToDelete = true;
-            }
-          }
-        }
-        continue;
-      }
-
+    for (const auto &doc : files) {
+      auto file = doc.get_document();
+      auto view = file.view();
       needs_updating = true;
-      auto fileDoc = file.get_document();
-      auto id = view["fileId"].get_utf8().value.to_string();
+      auto id = view["id"].get_utf8().value.to_string();
 
       mongocxx::model::update_one upsert_op(
           document{} << "id" << id << finalize,
-          document{} << "$set" << fileDoc << finalize);
+          document{} << "$set" << file << finalize);
 
       upsert_op.upsert(true);
       documents.append(upsert_op);
@@ -723,7 +746,7 @@ void Account::parseFilesAndFolders(bsoncxx::document::view value,
     }
   }
 
-  if (needs_updating or hasItemsToDelete) {
+  if (needs_updating) {
     mongocxx::pool::entry conn = pool.acquire();
     mongocxx::database client = conn->database(std::string(DATABASENAME));
     mongocxx::collection data = client[std::string(DATABASEDATA)];
@@ -731,26 +754,21 @@ void Account::parseFilesAndFolders(bsoncxx::document::view value,
     mongocxx::options::index index_options;
     if (data.count(document{} << finalize) == 0) {
       index_options.unique(true);
-      data.create_index(document{} << "index" << 1 << finalize, index_options);
+      data.create_index(document{} << "id" << 1 << finalize, index_options);
+      data.create_index(document{} << "parents" << 1 << finalize, index_options);
     }
 
-    if (needs_updating) {
       data.bulk_write(documents);
-    }
-    if (hasItemsToDelete) {
-      data.delete_many(document{} << "id" << open_document << "$in" << toDelete
-                                  << close_document << finalize);
-    }
 
-    settings.find_one_and_update(
-        document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
-                   << (teamDriveId.empty() ? "root" : teamDriveId) << finalize,
-        document{} << "$set" << open_document << "value"
-                   << m_newStartPageToken[teamDriveId] << close_document
-                   << finalize,
-        find_and_upsert
+    // settings.find_one_and_update(
+    //     document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
+    //                << (teamDriveId.empty() ? "root" : teamDriveId) << finalize,
+    //     document{} << "$set" << open_document << "value"
+    //                << m_newStartPageToken[teamDriveId] << close_document
+    //                << finalize,
+    //     find_and_upsert
 
-    );
+    // );
     //            if (updateCache)
     //                m_account->updateCache();
   }
@@ -846,7 +864,11 @@ void Account::getTeamDrives(int backoff) {
       auto doc = drive.get_document();
       auto view = doc.view();
       auto id = view["id"].get_utf8().value.to_string();
-      getFilesAndFolders("", id);
+      std::string nextPageToken = "";
+      do{
+        nextPageToken = getFilesAndFolders(nextPageToken, 0, id);
+
+      }while(!nextPageToken.empty());
     }
   }
 }
@@ -1206,7 +1228,7 @@ bool Account::upload(std::string uploadUrl, std::string filePath,
                      size_t fileSize, int64_t start, std::string mimeType) {
   refresh_token();
   boost::system::error_code ec;
-  if( fs::exists(filePath, ec) || ec){
+  if (fs::exists(filePath, ec) || ec) {
     // the file no longer exists, stop trying to upload
     return true;
   }
@@ -1219,6 +1241,7 @@ bool Account::upload(std::string uploadUrl, std::string filePath,
             //            char>::open_istream(
             filePath)
             .get();
+
     http_client client(uploadUrl, m_http_config);
 
     http_request req;
