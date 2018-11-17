@@ -143,8 +143,7 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
   while (true) {
     try {
       if (!skip_sleep || teamDriveId.empty()) {
-        LOG(DEBUG) << "Sleeping for " << this->refresh_interval << " seconds";
-        this->refresh_interval = 10;
+        // LOG(DEBUG) << "Sleeping for " << this->refresh_interval << " seconds";
         sleep(this->refresh_interval);
       }
       refresh_token();
