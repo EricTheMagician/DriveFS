@@ -376,12 +376,10 @@ void Account::background_update(std::string teamDriveId) {
       }
 
       if (nextPageTokenField) {
-        skip_sleep = true;
         continue;
       }
     } catch (std::exception &e) {
       LOG(ERROR) << e.what();
-      skip_sleep = true;
       continue;
     }
 
@@ -393,7 +391,7 @@ void Account::background_update(std::string teamDriveId) {
           continue;
         }
       }
-      if (!skip_sleep || teamDriveId.empty()) {
+      if (teamDriveId.empty()) {
         sleep(this->refresh_interval);
       }
 
