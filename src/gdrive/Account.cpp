@@ -153,13 +153,13 @@ void Account::background_update(std::string teamDriveId) {
                      "folder with token "
                   << pageToken;
         uriBuilder.append_query("includeTeamDriveItems", "false");
+        uriBuilder.append_query("restrictToMyDrive", "true");
       } else {
         LOG(INFO) << "Getting updated list of files and folders for folder "
                   << teamDriveId << " and token " << pageToken;
         uriBuilder.append_query("teamDriveId", teamDriveId);
         uriBuilder.append_query("includeTeamDriveItems", "true");
       }
-      uriBuilder.append_query("restrictToMyDrive", "true");
       uriBuilder.append_query("pageToken", pageToken);
       uriBuilder.append_query("pageSize", 1000);
       uriBuilder.append_query("supportsTeamDrives", "true");
@@ -390,7 +390,7 @@ void Account::background_update(std::string teamDriveId) {
           background_update(item.first);
         }
       }
-      
+
       LOG(INFO) << "Finished checking for changes.Sleeping for " << this->refresh_interval << " seconds.";
       sleep(this->refresh_interval);
 
@@ -626,13 +626,12 @@ std::string Account::getFilesAndFolders(std::string nextPageToken, int backoff,
 
   if (teamDriveId.empty()) {
     uriBuilder.append_query("corpora", "user");
-    uriBuilder.append_query("includeTeamDriveItems", "false");
     uriBuilder.append_query("q", "'me' in owners");
   } else {
     uriBuilder.append_query("corpora", "teamDrive");
-    uriBuilder.append_query("teamDriveId", teamDriveId);
     uriBuilder.append_query("includeTeamDriveItems", "true");
   }
+    uriBuilder.append_query("includeTeamDriveItems", "true");
   uriBuilder.append_query("pageSize", "999");
   uriBuilder.append_query("supportsTeamDrives", "true");
   //        uriBuilder.append_query("spaces", "drive");
@@ -681,8 +680,8 @@ std::string Account::getFilesAndFolders(std::string nextPageToken, int backoff,
     mongocxx::database db_client = conn->database(std::string(DATABASENAME));
     mongocxx::collection settings = db_client[std::string(DATABASESETTINGS)];
     uri_builder uriBuilder_change_token("changes/startPageToken");
+    uriBuilder_change_token.append_query("supportsTeamDrives", "true");
     if (!teamDriveId.empty()) {
-      uriBuilder_change_token.append_query("supportsTeamDrives", "true");
       uriBuilder_change_token.append_query("teamDriveId", teamDriveId);
     }
     http_response resp =
@@ -697,8 +696,7 @@ std::string Account::getFilesAndFolders(std::string nextPageToken, int backoff,
     // get next page token
     bsoncxx::document::element startPageToken = changeValue["startPageToken"];
     std::string newStartPageToken = startPageToken.get_utf8().value.to_string();
-    m_newStartPageToken[teamDriveId.empty() ? "root" : teamDriveId] =
-        newStartPageToken;
+    m_newStartPageToken[teamDriveId] = newStartPageToken;
     settings.find_one_and_update(
         document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
                    << (teamDriveId.empty() ? "root" : teamDriveId) << finalize,
@@ -1226,8 +1224,9 @@ bool Account::upload(std::string uploadUrl, std::string filePath,
                      size_t fileSize, int64_t start, std::string mimeType) {
   refresh_token();
   boost::system::error_code ec;
-  if (fs::exists(filePath, ec) || ec) {
+  if (!fs::exists(filePath, ec) || ec) {
     // the file no longer exists, stop trying to upload
+    LOG(ERROR << filePath << " no longer exists and will stop trying to upload it.");
     return true;
   }
 
