@@ -388,13 +388,11 @@ void Account::background_update(std::string teamDriveId) {
       for (auto &item : this->m_newStartPageToken) {
         if (!item.first.empty()) {
           background_update(item.first);
-          continue;
         }
       }
-      if (teamDriveId.empty()) {
-        LOG(INFO) << "Finished checking for changes.\nSleeping for " << this->refresh_interval << " seconds.";
-        sleep(this->refresh_interval);
-      }
+      
+      LOG(INFO) << "Finished checking for changes.Sleeping for " << this->refresh_interval << " seconds.";
+      sleep(this->refresh_interval);
 
       continue;
     } else {
