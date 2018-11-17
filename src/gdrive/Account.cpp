@@ -4,8 +4,8 @@
 
 #include "gdrive/Account.h"
 #include "BaseFileSystem.h"
-#include <boost/asio/thread_pool.hpp>
 #include <boost/asio.hpp>
+#include <boost/asio/thread_pool.hpp>
 #include <cpprest/filestream.h>
 #include <easylogging++.h>
 #include <gdrive/File.h>
@@ -59,8 +59,6 @@ Account::Account(std::string dbUri)
       }
     }
   }
-
-
 }
 
 Account::Account(std::string dbUri, const std::string &at,
@@ -80,10 +78,10 @@ Account::Account(std::string dbUri, const std::string &at,
   m_needToInitialize = false;
   if (m_newStartPageToken.size() == 0) {
     std::string nextPageToken = "";
-    parseFilesAndFolderThreadPool = new boost::asio::thread_pool(4); 
-    do{
-      nextPageToken=getFilesAndFolders(nextPageToken);
-    }while(!nextPageToken.empty());
+    parseFilesAndFolderThreadPool = new boost::asio::thread_pool(4);
+    do {
+      nextPageToken = getFilesAndFolders(nextPageToken);
+    } while (!nextPageToken.empty());
     getTeamDrives();
     parseFilesAndFolderThreadPool->join();
     delete parseFilesAndFolderThreadPool;
@@ -91,7 +89,7 @@ Account::Account(std::string dbUri, const std::string &at,
   }
   loadFilesAndFolders();
 
-  SFAsync(&Account::background_update, this, std::string(""), false);
+  SFAsync(&Account::background_update, this, std::string(""));
 }
 
 void Account::run_internal() {
@@ -111,7 +109,7 @@ void Account::run_internal() {
       options);
   m_refresh_token = token.refresh_token();
 
-  SFAsync(&Account::background_update, this, std::string(""), false);
+  SFAsync(&Account::background_update, this, std::string(""));
 }
 
 Account Account::getAccount(std::string suri) {
@@ -139,13 +137,9 @@ Account Account::getAccount(std::string suri) {
   return Account(suri);
 }
 
-void Account::background_update(std::string teamDriveId, bool skip_sleep) {
+void Account::background_update(std::string teamDriveId) {
   while (true) {
     try {
-      if (!skip_sleep || teamDriveId.empty()) {
-        // LOG(DEBUG) << "Sleeping for " << this->refresh_interval << " seconds";
-        sleep(this->refresh_interval);
-      }
       refresh_token();
 
       http_client client(this->m_apiEndpoint, this->m_http_config);
@@ -178,12 +172,12 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
       if (response.status_code() != 200) {
         LOG(ERROR) << "Failed to get changes: " << response.reason_phrase();
         LOG(ERROR) << response.extract_json(true).get();
-        background_update(teamDriveId, false);
+        background_update(teamDriveId);
         return;
       }
       mongocxx::bulk_write documents;
       bsoncxx::document::value doc =
-      bsoncxx::from_json(response.extract_utf8string().get());
+          bsoncxx::from_json(response.extract_utf8string().get());
       bsoncxx::document::view value = doc.view();
 
       // get next page token
@@ -239,7 +233,7 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
                 }
               }
             }
-            
+
             continue;
           }
 
@@ -337,7 +331,8 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
             }
 
             _Object::insertObjectToMemoryMap(file);
-            bsoncxx::array::view parents = fileDoc.view()["parents"].get_array();
+            bsoncxx::array::view parents =
+                fileDoc.view()["parents"].get_array();
             for (auto parentId : parents) {
               auto it = DriveFS::_Object::idToObject.find(
                   parentId.get_utf8().value.to_string());
@@ -394,11 +389,14 @@ void Account::background_update(std::string teamDriveId, bool skip_sleep) {
 
       for (auto &item : this->m_newStartPageToken) {
         if (!item.first.empty()) {
-          background_update(item.first, true);
+          background_update(item.first);
           continue;
         }
       }
-      skip_sleep = false;
+      if (!skip_sleep || teamDriveId.empty()) {
+        sleep(this->refresh_interval);
+      }
+
       continue;
     } else {
       // return only if the teamdrive id is not root. ie only the root folder
@@ -607,15 +605,16 @@ void Account::loadFilesAndFolders() {
   linkParentsAndChildren();
 }
 
-std::string Account::getFilesAndFolders(std::string nextPageToken,
-                                 int backoff, 
-                                 std::string teamDriveId) {
+std::string Account::getFilesAndFolders(std::string nextPageToken, int backoff,
+                                        std::string teamDriveId) {
 
   refresh_token();
-  if(teamDriveId.empty()){
-    LOG(INFO) << "Getting current list of files and folders with token: "<< nextPageToken;
-  }else{
-    LOG(INFO) << "Getting team drive "<<teamDriveId << " list of files and folders with token: "<< nextPageToken;
+  if (teamDriveId.empty()) {
+    LOG(INFO) << "Getting current list of files and folders with token: "
+              << nextPageToken;
+  } else {
+    LOG(INFO) << "Getting team drive " << teamDriveId
+              << " list of files and folders with token: " << nextPageToken;
   }
 
   http_client aClient(m_apiEndpoint, m_http_config);
@@ -623,17 +622,16 @@ std::string Account::getFilesAndFolders(std::string nextPageToken,
 
   if (nextPageToken.length() > 0) {
     uriBuilder.append_query("pageToken", nextPageToken);
-  } else if(teamDriveId.empty()){
+  } else if (teamDriveId.empty()) {
     // get root metadata
     getRootFolder();
   }
 
-  if(teamDriveId.empty()){
+  if (teamDriveId.empty()) {
     uriBuilder.append_query("corpora", "user");
     uriBuilder.append_query("includeTeamDriveItems", "false");
     uriBuilder.append_query("q", "'me' in owners");
-
-  }else{
+  } else {
     uriBuilder.append_query("corpora", "teamDrive");
     uriBuilder.append_query("teamDriveId", teamDriveId);
     uriBuilder.append_query("includeTeamDriveItems", "true");
@@ -650,7 +648,8 @@ std::string Account::getFilesAndFolders(std::string nextPageToken,
     unsigned int sleep_time = std::pow(2, backoff);
     LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
     sleep(sleep_time);
-    return getFilesAndFolders(nextPageToken, backoff > 5? backoff: backoff + 1);
+    return getFilesAndFolders(nextPageToken,
+                              backoff > 5 ? backoff : backoff + 1);
   }
   bsoncxx::document::value doc =
       bsoncxx::from_json(response.extract_utf8string().get());
@@ -660,7 +659,8 @@ std::string Account::getFilesAndFolders(std::string nextPageToken,
 
   // get next page token
   bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
-  nextPageToken = nextPageTokenField ? nextPageTokenField.get_utf8().value.to_string() : "";
+  nextPageToken =
+      nextPageTokenField ? nextPageTokenField.get_utf8().value.to_string() : "";
 
   // // get new start page token
   // bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
@@ -672,42 +672,42 @@ std::string Account::getFilesAndFolders(std::string nextPageToken,
   //       newStartPageToken.get_utf8().value.to_string();
   // }
   boost::asio::defer(*parseFilesAndFolderThreadPool,
-                      [docToParse = std::move(doc), this]() -> void {
-                        this->parseFilesAndFolders(docToParse);
-                      });
+                     [docToParse = std::move(doc), this]() -> void {
+                       this->parseFilesAndFolders(docToParse);
+                     });
 
- 
   // parse files
   if (!nextPageToken.empty()) {
     return nextPageToken;
   } else {
-      mongocxx::pool::entry conn = pool.acquire();
-      mongocxx::database db_client = conn->database(std::string(DATABASENAME));
-      mongocxx::collection settings = db_client[std::string(DATABASESETTINGS)];
-      uri_builder uriBuilder_change_token("changes/startPageToken");
-      if(!teamDriveId.empty()){
-        uriBuilder_change_token.append_query("supportsTeamDrives", "true");
-        uriBuilder_change_token.append_query("teamDriveId", teamDriveId);
-      }
-      http_response resp = aClient.request(methods::GET, uriBuilder_change_token.to_string()).get();
-      bsoncxx::document::value changeDoc =
-          bsoncxx::from_json(resp.extract_utf8string().get());
-      bsoncxx::document::view changeValue = changeDoc.view();
+    mongocxx::pool::entry conn = pool.acquire();
+    mongocxx::database db_client = conn->database(std::string(DATABASENAME));
+    mongocxx::collection settings = db_client[std::string(DATABASESETTINGS)];
+    uri_builder uriBuilder_change_token("changes/startPageToken");
+    if (!teamDriveId.empty()) {
+      uriBuilder_change_token.append_query("supportsTeamDrives", "true");
+      uriBuilder_change_token.append_query("teamDriveId", teamDriveId);
+    }
+    http_response resp =
+        aClient.request(methods::GET, uriBuilder_change_token.to_string())
+            .get();
+    bsoncxx::document::value changeDoc =
+        bsoncxx::from_json(resp.extract_utf8string().get());
+    bsoncxx::document::view changeValue = changeDoc.view();
 
-      bool needs_updating = false;
+    bool needs_updating = false;
 
-      // get next page token
-      bsoncxx::document::element startPageToken = changeValue["startPageToken"];
-      std::string newStartPageToken = startPageToken.get_utf8().value.to_string();
-      m_newStartPageToken[teamDriveId.empty()?"root": teamDriveId] = newStartPageToken;
-      settings.find_one_and_update(
-      document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
-                  << (teamDriveId.empty() ? "root" : teamDriveId) << finalize,
-      document{} << "$set" << open_document << "value"
-                  << newStartPageToken << close_document
-                  << finalize,
-      find_and_upsert
-      );
+    // get next page token
+    bsoncxx::document::element startPageToken = changeValue["startPageToken"];
+    std::string newStartPageToken = startPageToken.get_utf8().value.to_string();
+    m_newStartPageToken[teamDriveId.empty() ? "root" : teamDriveId] =
+        newStartPageToken;
+    settings.find_one_and_update(
+        document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
+                   << (teamDriveId.empty() ? "root" : teamDriveId) << finalize,
+        document{} << "$set" << open_document << "value" << newStartPageToken
+                   << close_document << finalize,
+        find_and_upsert);
 
     return "";
   }
@@ -754,14 +754,16 @@ void Account::parseFilesAndFolders(bsoncxx::document::view value) {
     if (data.count(document{} << finalize) == 0) {
       index_options.unique(true);
       data.create_index(document{} << "id" << 1 << finalize, index_options);
-      data.create_index(document{} << "parents" << 1 << finalize, index_options);
+      data.create_index(document{} << "parents" << 1 << finalize,
+                        index_options);
     }
 
-      data.bulk_write(documents);
+    data.bulk_write(documents);
 
     // settings.find_one_and_update(
     //     document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
-    //                << (teamDriveId.empty() ? "root" : teamDriveId) << finalize,
+    //                << (teamDriveId.empty() ? "root" : teamDriveId) <<
+    //                finalize,
     //     document{} << "$set" << open_document << "value"
     //                << m_newStartPageToken[teamDriveId] << close_document
     //                << finalize,
@@ -864,10 +866,10 @@ void Account::getTeamDrives(int backoff) {
       auto view = doc.view();
       auto id = view["id"].get_utf8().value.to_string();
       std::string nextPageToken = "";
-      do{
+      do {
         nextPageToken = getFilesAndFolders(nextPageToken, 0, id);
 
-      }while(!nextPageToken.empty());
+      } while (!nextPageToken.empty());
     }
   }
 }

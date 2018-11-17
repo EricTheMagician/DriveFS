@@ -85,8 +85,7 @@ private:
   void generateIds(int_fast8_t backoff = 0);
   std::string createFolderOnGDrive(const std::string json, int backoff = 0);
   bool trash(GDriveObject file, int backoff = 0);
-  virtual void background_update(std::string teamDriveId = "",
-                                 bool skip_sleep = false);
+  virtual void background_update(std::string teamDriveId);
   bsoncxx::document::value getRootFolder();
   void invalidateParentEntry(const GDriveObject &obj)
   {
