@@ -932,10 +932,19 @@ std::string Account::createFolderOnGDrive(std::string json, int backoff) {
   builder.append_query("supportsTeamDrives", "true");
   //        builder.append_query("uploadType", "resumable");
 
-  http_response resp =
-      client
-          .request(methods::POST, builder.to_string(), json, "application/json")
-          .get();
+  http_response resp;
+  try {
+      resp = client.request(methods::POST, builder.to_string(), json, "application/json").get();
+  }catch(std::exception &e){
+      LOG(ERROR) << "Failed to create folders: " << e.what();
+      LOG(ERROR) << json;
+      LOG(ERROR) << resp.extract_json(true).get();
+      unsigned int sleep_time = std::pow(2, backoff);
+      LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+      sleep(sleep_time);
+
+      return createFolderOnGDrive(json, backoff);
+  }
   if (resp.status_code() != 200) {
     LOG(ERROR) << "Failed to create folders: " << resp.reason_phrase();
     LOG(ERROR) << json;
