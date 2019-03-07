@@ -745,7 +745,7 @@ namespace DriveFS{
                         fs::path out_path = cachePath;
                         out_path /= "download";
                         out_path /= m_file->getId() + "-" + std::to_string(start);
-                        int out_fd = ::open(out_path.c_str(), O_WRONLY | O_CREAT);
+                        int out_fd = ::open(out_path.c_str(), O_WRONLY | O_CREAT, S_IRWXU);
 
 
                         if (out_fd < 0) {
