@@ -78,9 +78,9 @@ namespace DriveFS{
     void getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
             GDriveObject object(getObjectFromInodeAndReq(req, ino));
             if (object) {
-                int reply_err = fuse_reply_attr(req, &(object->attribute), 180.0);
+                int reply_err = fuse_reply_attr(req, &(object->attribute), 30.0);
                 while(reply_err != 0){
-                    reply_err = fuse_reply_attr(req, &(object->attribute), 180.0);
+                    reply_err = fuse_reply_attr(req, &(object->attribute), 30.0);
                 }
                 return;
             }
@@ -214,7 +214,9 @@ namespace DriveFS{
                     child->m_event.signal();
                 }else{
                     child->trash();
+                    child->m_event.wait();
                     parent->removeChild(child);
+                    child->m_event.signal();
                     child->removeParent(parent);
                     if(child->parents.empty()) {
                         account->removeFileWithIDFromDB(child->getId());
@@ -331,8 +333,14 @@ namespace DriveFS{
 #endif
             }
             LOG(INFO) << "Renaming: Mving file ("<< name<<") from " << parent->getName() << " to " << newParent->getName();
+            parent->m_event.wait();
             parent->removeChild(child);
+            parent->m_event.signal();
+
+            newParent->m_event.wait();
             newParent->addChild(child);
+            newParent->m_event.signal();
+
         }
 
         if(child->getName() != newname) {

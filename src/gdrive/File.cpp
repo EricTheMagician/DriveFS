@@ -302,13 +302,11 @@ namespace DriveFS{
 
 
     bool _Object::addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship){
-        m_event.wait();
         bool status = false;
         if( std::find(relationship.begin(), relationship.end(), other) == relationship.end() ){
             relationship.emplace_back(other);
             status = true;
         }
-        m_event.signal();
         return status;
     }
 
