@@ -163,6 +163,7 @@ namespace DriveFS{
 
     void mkdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name, mode_t mode){
         auto parent = getObjectFromInodeAndReq(req, parent_ino);
+        parent->m_event.wait();
         GDriveObject child = parent->findChildByName(name);
         if (child) {
             LOG(INFO) << "Mkdir with name " << name << " already existed";
@@ -170,11 +171,13 @@ namespace DriveFS{
             while(reply_err != 0){
                 reply_err = fuse_reply_err(req, EEXIST);
             }
+            parent->m_event.signal();
             return;
         }
 
         auto account = getAccount(req);
         auto folder = account->createNewChild(parent, name, mode, false);
+        parent->m_event.signal();
         struct fuse_entry_param e;
         memset(&e, 0, sizeof(e));
         e.attr = folder->attribute;
@@ -863,7 +866,7 @@ namespace DriveFS{
             }
             return;
         }
-
+        parent->m_event.wait();
         for (auto child: parent->children) {
             if (child->getName().compare(name) == 0) {
                 LOG(INFO) << "When creating file with name " << name << " parentId " << parent->getId() << " already existed";
@@ -871,6 +874,7 @@ namespace DriveFS{
                 while(reply_err != 0){
                     reply_err = fuse_reply_err(req, EEXIST);
                 }
+                parent->m_event.signal();
                 return;
             }
         }
@@ -879,6 +883,7 @@ namespace DriveFS{
         LOG(INFO) << "Creating file with name " << name << " and parent Id " << parent->getId();
 
         GDriveObject child = account->createNewChild(parent, name, mode, true);
+        parent->m_event.signal();
         FileIO *io = new FileIO(child, fi->flags);
         fi->fh = (uintptr_t) io;
         struct fuse_entry_param e;
