@@ -73,9 +73,9 @@ public:
 protected:
   void run_internal() override;
   virtual void loadFilesAndFolders() override;
-  [[nodiscard]] virtual std::string getFilesAndFolders(std::string nextPageToken = "",
+  [[nodiscard]] virtual std::string getFilesAndFolders(std::string_view nextPageToken = "",
                                   int backoff = 0,
-                                  std::string teamDriveId="");
+                                  std::string_view teamDriveId="");
 
 private:
   void parseFilesAndFolders(bsoncxx::document::view value);

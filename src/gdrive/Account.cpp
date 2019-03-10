@@ -52,10 +52,9 @@ Account::Account(std::string dbUri)
       LOG(INFO) << "Previous change tokens founds";
       auto s_driveId = driveId.get_utf8().value;
       if (s_driveId == "root") {
-        m_newStartPageToken[std::string("")] = res.get_utf8().value.to_string();
+        m_newStartPageToken[std::string("")] = res.get_utf8();
       } else {
-        m_newStartPageToken[s_driveId.to_string()] =
-            res.get_utf8().value.to_string();
+            m_newStartPageToken[std::string(s_driveId)] =res.get_utf8();
       }
     }
   }
@@ -128,8 +127,8 @@ Account Account::getAccount(std::string suri) {
   if (maybeResult) {
     LOG(INFO) << "Access tokens founds";
     auto res = maybeResult->view();
-    std::string at(res["access_token"].get_utf8().value.to_string()),
-        rt(res["refresh_token"].get_utf8().value.to_string());
+    std::string at(res["access_token"].get_utf8()),
+        rt(res["refresh_token"].get_utf8());
 
     if (!at.empty() && !rt.empty())
       return Account(suri, at, rt);
@@ -183,18 +182,18 @@ void Account::background_update(std::string teamDriveId) {
       // get next page token
       bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
       if (nextPageTokenField) {
-        auto temp = nextPageTokenField.get_utf8().value.to_string();
-        if (!temp.empty()) {
-          m_newStartPageToken[teamDriveId] = std::move(temp);
+        auto sv = nextPageTokenField.get_utf8().value;
+        if (!sv.empty()) {
+          m_newStartPageToken[teamDriveId] = sv;
         }
       }
 
       // get new start page token
       bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
       if (newStartPageToken) {
-        auto temp = newStartPageToken.get_utf8().value.to_string();
+        auto temp = newStartPageToken.get_utf8().value;
         if (!temp.empty() && temp != pageToken) {
-          m_newStartPageToken[teamDriveId] = std::move(temp);
+          m_newStartPageToken[teamDriveId] = temp;
         }
       }
 
@@ -217,8 +216,7 @@ void Account::background_update(std::string teamDriveId) {
               if (deleted.get_bool().value) {
                 // LOG(DEBUG) << bsoncxx::to_json(doc);
                 if (view["fileId"]) {
-                  std::string fileId =
-                      view["fileId"].get_utf8().value.to_string();
+                  std::string fileId = std::string(view["fileId"].get_utf8().value);
                   toDelete.append(fileId);
                   hasItemsToDelete = true;
                   auto file = _Object::idToObject.find(fileId);
@@ -239,7 +237,7 @@ void Account::background_update(std::string teamDriveId) {
 
           needs_updating = true;
           auto fileDoc = file.get_document();
-          auto id = view["fileId"].get_utf8().value.to_string();
+          std::string id = std::string(view["fileId"].get_utf8().value);
 
           mongocxx::model::update_one upsert_op(
               document{} << "id" << id << finalize,
@@ -264,10 +262,9 @@ void Account::background_update(std::string teamDriveId) {
 
             // remove old parents
             for (auto parentId : newParentIds.get_array().value) {
-              const std::string s_parentId =
-                  parentId.get_utf8().value.to_string();
+              const std::string s_parentId = std::string(parentId.get_utf8().value);
               bool need_to_remove = true;
-              for (auto &parent : oldParents) {
+              for (auto const & parent : oldParents) {
                 if (parent->getId() == s_parentId) {
                   need_to_remove = false;
                   break;
@@ -294,8 +291,7 @@ void Account::background_update(std::string teamDriveId) {
             oldParents = file->parents;
             for (auto parentId : newParentIds.get_array().value) {
               bool need_to_set = true;
-              const std::string s_parentId =
-                  parentId.get_utf8().value.to_string();
+              const std::string s_parentId(parentId.get_utf8().value);
               for (auto parent : oldParents) {
                 if (parent->getId() != s_parentId) {
                   continue;
@@ -335,7 +331,7 @@ void Account::background_update(std::string teamDriveId) {
                 fileDoc.view()["parents"].get_array();
             for (auto parentId : parents) {
               auto it = DriveFS::_Object::idToObject.find(
-                  parentId.get_utf8().value.to_string());
+                  std::string(parentId.get_utf8().value));
               if (it != DriveFS::_Object::idToObject.end()) {
                 it->second->addChild(file);
                 file->addParent(it->second);
@@ -415,16 +411,14 @@ void Account::linkParentsAndChildren() {
                         options);
 
   for (auto doc : cursor) {
-    std::string child = doc["id"].get_utf8().value.to_string();
-    if (child == "1Ez8abTySPQPbw9TNXqVEm8yJ5YxOzmSh") {
-      printf(" ");
-    }
+    std::string child(doc["id"].get_utf8().value);
+
     auto found = DriveFS::_Object::idToObject.find(child);
     if (found != DriveFS::_Object::idToObject.end()) {
       bsoncxx::array::view parents = doc["parents"].get_array();
       for (auto parentId : parents) {
         auto found2 = DriveFS::_Object::idToObject.find(
-            parentId.get_utf8().value.to_string());
+            std::string(parentId.get_utf8().value));
         if (found2 != DriveFS::_Object::idToObject.end()) {
           found2->second->addChild(found->second);
           found->second->addParent(found2->second);
@@ -512,7 +506,7 @@ void Account::loadFilesAndFolders() {
 
         auto ele = doc["uploadUrl"];
         if (ele) {
-          std::string url = ele.get_utf8().value.to_string();
+          std::string url(ele.get_utf8().value);
           LOG(INFO) << "Adding to queue upload of file with name "
                     << object->getName() << " and id " << object->getId();
           io->resumeFileUploadFromUrl(url, true);
@@ -602,8 +596,8 @@ void Account::loadFilesAndFolders() {
   linkParentsAndChildren();
 }
 
-std::string Account::getFilesAndFolders(std::string nextPageToken, int backoff,
-                                        std::string teamDriveId) {
+std::string Account::getFilesAndFolders(std::string_view nextPageToken, int backoff,
+                                        std::string_view teamDriveId) {
 
   refresh_token();
   if (teamDriveId.empty()) {
@@ -657,7 +651,7 @@ std::string Account::getFilesAndFolders(std::string nextPageToken, int backoff,
   // get next page token
   bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
   nextPageToken =
-      nextPageTokenField ? nextPageTokenField.get_utf8().value.to_string() : "";
+      nextPageTokenField ? nextPageTokenField.get_utf8().value : "";
 
   // // get new start page token
   // bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
@@ -675,7 +669,7 @@ std::string Account::getFilesAndFolders(std::string nextPageToken, int backoff,
 
   // parse files
   if (!nextPageToken.empty()) {
-    return nextPageToken;
+    return std::string(nextPageToken);
   } else {
     mongocxx::pool::entry conn = pool.acquire();
     mongocxx::database db_client = conn->database(std::string(DATABASENAME));
@@ -696,8 +690,8 @@ std::string Account::getFilesAndFolders(std::string nextPageToken, int backoff,
 
     // get next page token
     bsoncxx::document::element startPageToken = changeValue["startPageToken"];
-    std::string newStartPageToken = startPageToken.get_utf8().value.to_string();
-    m_newStartPageToken[teamDriveId.empty() ? "root" : teamDriveId] =
+    std::string newStartPageToken(startPageToken.get_utf8());
+    m_newStartPageToken[teamDriveId.empty() ? "root" : std::string(teamDriveId)] =
         newStartPageToken;
     settings.find_one_and_update(
         document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
@@ -723,7 +717,7 @@ void Account::parseFilesAndFolders(bsoncxx::document::view value) {
       auto file = doc.get_document();
       auto view = file.view();
       needs_updating = true;
-      auto id = view["id"].get_utf8().value.to_string();
+      auto id = view["id"].get_utf8();
 
       mongocxx::model::update_one upsert_op(
           document{} << "id" << id << finalize,
@@ -786,7 +780,7 @@ bsoncxx::document::value Account::getRootFolder() {
 
   auto rootValue = value["id"];
   if (rootValue) {
-    auto rootId = rootValue.get_utf8().value.to_string();
+    auto rootId = rootValue.get_utf8();
     data.update_one(document{} << "id" << rootId << finalize,
                     document{} << "$set" << open_document << concatenate(value)
                                << "isRoot" << 1 << close_document << finalize,
@@ -834,7 +828,7 @@ void Account::getTeamDrives(int backoff) {
     for (const auto &drive : drives) {
       auto doc = drive.get_document();
       auto view = doc.view();
-      auto id = view["id"].get_utf8().value.to_string();
+      auto id = view["id"].get_utf8();
 
       mongocxx::model::update_one upsert_op(
           document{} << "id" << id << finalize,
@@ -861,7 +855,7 @@ void Account::getTeamDrives(int backoff) {
     for (const auto &drive : drives) {
       auto doc = drive.get_document();
       auto view = doc.view();
-      auto id = view["id"].get_utf8().value.to_string();
+      auto id = view["id"].get_utf8();
       std::string nextPageToken = "";
       do {
         nextPageToken = getFilesAndFolders(nextPageToken, 0, id);
@@ -920,7 +914,7 @@ void Account::generateIds(int_fast8_t backoff) {
       bsoncxx::from_json(resp.extract_utf8string().get());
   auto view = doc.view();
   for (auto id : view["ids"].get_array().value) {
-    m_id_buffer.push_front(id.get_utf8().value.to_string());
+    m_id_buffer.push_front(std::string(id.get_utf8()));
   }
 }
 
@@ -1275,7 +1269,7 @@ bool Account::upload(std::string uploadUrl, std::string filePath,
       bsoncxx::document::view value = doc.view();
       try {
         if (auto fileId = value["id"]) {
-          const auto id = fileId.get_utf8().value.to_string();
+          const auto id = std::string(fileId.get_utf8().value);
           auto cursor = _Object::idToObject.find(id);
           if (cursor != _Object::idToObject.end()) {
             cursor->second->setIsUploaded(true);

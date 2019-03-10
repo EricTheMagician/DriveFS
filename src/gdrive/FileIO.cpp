@@ -505,7 +505,7 @@ namespace DriveFS{
                     path /= "download";
                     path /= cacheName2;
 
-                    if(fs::exists(path) && (fs::file_size(path) == block_download_size|| _chunkNumber == getChunkNumber(m_file->getFileSize(), block_download_size))) {
+                    if( (fs::exists(path) && (fs::file_size(path) == block_download_size|| _chunkNumber == getChunkNumber(m_file->getFileSize(), block_download_size))) && (!item) ) {
                         boost::asio::defer(*ReadPool,
                                            [io = this, start, chunkSize, path, weak_obj = std::weak_ptr(cache)]() -> void {
                                                auto strong_obj = weak_obj.lock();
@@ -646,7 +646,15 @@ namespace DriveFS{
                                        // file can have no parents happen when launching DriveFS
                                        // so wait until it is filled. if it's deleted
                                        auto file = io->m_file;
-                                       while(io->m_file->parents.empty() && !io->m_file->getIsTrashed() && !io->m_file->getIsUploaded());
+                                       while(io->m_file->parents.empty() && !io->m_file->getIsTrashed() && !io->m_file->getIsUploaded()){
+                                           if(file->getIsTrashed()){
+                                               LOG(INFO) << "fiile with id " << file->getId() << "is trashed";
+                                               return;
+                                           }
+                                           LOG(INFO) << "while uploading: waiting for " << file->getId() << "to have parents";
+                                           sleep(1);
+                                       }
+                                       
 
                                        if(file->getIsTrashed()){
                                            io->checkFileExists();
@@ -743,7 +751,7 @@ namespace DriveFS{
                     while ((start + read_size) <= sz) {
 
                         fs::path out_path = cachePath;
-                        out_path /= "download";
+                            out_path /= "download";
                         out_path /= m_file->getId() + "-" + std::to_string(start);
                         int out_fd = ::open(out_path.c_str(), O_WRONLY | O_CREAT, S_IRWXU);
 
@@ -821,16 +829,22 @@ namespace DriveFS{
         if(b_needs_uploading){
             m_account->upsertFileToDatabase(m_file);
 
-            fs::path released;
-            if(f_name.empty()) {
-                released = uploadPath;
-                released /= m_file->getId();
-            }else{
-                released = fs::path(f_name);
-            }
-            released += ".released";
             if(fs::exists(f_name)){
-                fs::rename(f_name, released);
+                fs::path released;
+                if(f_name.empty()) {
+                    released = uploadPath;
+                    released /= m_file->getId();
+                }else{
+                    try{
+                        released = fs::path(f_name);
+                        released += ".released";
+                        fs::rename(f_name, released);
+                    }catch(std::exception &e){
+                        LOG(ERROR) << "There was an error when trying to rename a file";
+                        LOG(ERROR) << e.what();
+                    }
+                }
+
             }else{
                 b_needs_uploading = false;
             }
@@ -864,7 +878,14 @@ namespace DriveFS{
 
                 // file can have no parents happen when launching DriveFS
                 // so wait until it is filled
-                while(io->m_file->parents.empty());
+                auto file = io->m_file.get();
+                while(file->parents.empty() ){
+                    if(file->getIsTrashed()){
+                        return;
+                    }
+                    sleep(1);
+                    LOG(INFO) << "while getting resumeable upload url, parents were empty for file with id " << file->getId() <<" -- sleeping";
+                };
 
                 while(!io->resumeFileUploadFromUrl(url));
                 delete io;
@@ -997,7 +1018,7 @@ namespace DriveFS{
             ReadPool = new boost::asio::thread_pool(n);
         }else{
             DownloadPool = new boost::asio::thread_pool(std::thread::hardware_concurrency());
-            ReadPool = DownloadPool = new boost::asio::thread_pool(std::thread::hardware_concurrency());
+            ReadPool  = new boost::asio::thread_pool(std::thread::hardware_concurrency());
         }
     }
     void setMaxConcurrentUpload(int n){
@@ -1031,7 +1052,7 @@ namespace DriveFS{
         auto toDelete = bsoncxx::builder::basic::array{};
         uint_fast8_t nToDelete = 0;
         for( auto doc: cursor){
-            std::string filename = doc["filename"].get_utf8().value.to_string();
+            std::string filename = std::string(doc["filename"].get_utf8().value);
             int64_t size = doc["size"].get_int64().value;
             if( fs::exists(fs::path(filename))) {
                 if(unlink(filename.c_str()) == 0 )
@@ -1129,16 +1150,21 @@ namespace DriveFS{
         mongocxx::options::update option;
         option.upsert(true);
 
-        db.update_one(
-                document{} << "filename" << path.string() << finalize,
-                document{} << "$set" << open_document << "filename" << path.string()
-                           << "size" << ((int64_t) size)
-                           << "mtime" << time(nullptr)
-                           << "exists" << true
-                           << close_document << finalize,
-                option
+        try {
+            db.update_one(
+                    document{} << "filename" << path.string() << finalize,
+                    document{} << "$set" << open_document << "filename" << path.string()
+                               << "size" << ((int64_t) size)
+                               << "mtime" << time(nullptr)
+                               << "exists" << true
+                               << close_document << finalize,
+                    option
 
-        );
+            );
+        }catch(std::exception &e) {
+            LOG(ERROR) << e.what();
+            insertFileToCacheDatabase(path, size);
+        }
 
         incrementCacheSize(size);
 
