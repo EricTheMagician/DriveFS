@@ -12,13 +12,15 @@
 #include <atomic>
 #include <autoresetevent.h>
 #include <easylogging++.h>
+#include <atomic>
+
 
 class __no_collision_download__;
 struct compare_download_items;
 typedef std::shared_ptr< __no_collision_download__> DownloadItem;
 typedef std::weak_ptr< __no_collision_download__> WeakBuffer;
 
-static std::atomic_int64_t created(0);
+static std::atomic<int64_t> created(0);
 
 class __no_collision_download__{
 public:
@@ -26,12 +28,14 @@ public:
     size_t size = 0;
     std::string name;
 
-    int64_t last_access=0;
+    int64_t last_access;
     bool isInvalid=false;
-    std::atomic<uint_fast8_t> invalidReason=0;
+    std::atomic<uint_fast8_t> invalidReason;
     AutoResetEvent event;
 
-    __no_collision_download__(): buffer(nullptr), size(0), name(""), isInvalid(false){
+    __no_collision_download__(): buffer(nullptr), size(0), name(""), isInvalid(false), last_access(0),
+                                 invalidReason(0)
+    {
 ////        created++;
 //        LOG(INFO) << (created++) + 1<< " collision downloads created available";
     }
@@ -125,7 +129,10 @@ public:
             VLOG(9) << "Deleting cache item "<< head->name <<" of size " << sz;
             LOG_IF(head.use_count() > 1, TRACE) << "Use count for " << head->name << " is " << head.use_count();
             cache->pop();
-
+            if(cache->empty()){
+                cacheSize.compare_exchange_strong(newCacheSize, (size_t) 0);  
+                break;
+            }
         }
         VLOG(9) << "Inserting " << std::to_string(chunkNumber);
         sema.signal();

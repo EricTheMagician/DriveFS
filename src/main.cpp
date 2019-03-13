@@ -7,46 +7,55 @@
 #include "gdrive/FileIO.h"
 #include "gdrive/File.h"
 
+#include <sstream>
+#if FUSE_USE_VERSION < 30
+#endif
+
 namespace po = boost::program_options;
 
 INITIALIZE_EASYLOGGINGPP;
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
 
     po::options_description desc("General options"), log_desc("Log Options"), fuse_desc("Fuse Optionns");
-    std::string max_download = std::string("max number of concurrent downloads, defaults to ") + std::to_string(std::thread::hardware_concurrency() );
-    std::string max_upload = std::string("max number of concurrent uploads, defaults to ") + std::to_string(std::thread::hardware_concurrency());
+    std::string max_download = std::string("max number of concurrent downloads, defaults to ") +
+                               std::to_string(std::thread::hardware_concurrency());
+    std::string max_upload = std::string("max number of concurrent uploads, defaults to ") +
+                             std::to_string(std::thread::hardware_concurrency());
     desc.add_options()
             ("help,h", "t his help message")
             ("config-file,c", po::value<std::string>(), "path to a config file. arguments should be one per line")
             ("mount", po::value<std::string>(), "set the mount point. useful for config files")
             ("database", po::value<std::string>()->default_value("mongodb://localhost/"), "set the database path")
             ("cache-location", po::value<std::string>()->default_value("/tmp/DriveFS"))
-            ("cache-chunk-size", po::value<size_t>()->default_value(8*1024*1024), "size of segments to download, in bytes, default: 8MB")
-            ("cache-size", po::value<size_t>()->default_value(512), "maximum amount of memory to be used for in memory cache. values in MB. Default: 512MB")
-            ("cache-disk-size", po::value<size_t>()->default_value(512), "maximum size of the cache on disk, in megabytes. only for downloads, defaults to 512MB")
+            ("cache-chunk-size", po::value<size_t>()->default_value(8 * 1024 * 1024),
+             "size of segments to download, in bytes, default: 8MB")
+            ("cache-size", po::value<size_t>()->default_value(512),
+             "maximum amount of memory to be used for in memory cache. values in MB. Default: 512MB")
+            ("cache-disk-size", po::value<size_t>()->default_value(512),
+             "maximum size of the cache on disk, in megabytes. only for downloads, defaults to 512MB")
             ("download-chunks", po::value<int>()->default_value(4), "maximum number of chunks to download ahead")
-            ("download-last-chunk", po::value<bool>()->default_value(true), "download the last chunk of a file when downloading the first chunk")
+            ("download-last-chunk", po::value<bool>()->default_value(true),
+             "download the last chunk of a file when downloading the first chunk")
             ("move-to-download", po::value<bool>()->default_value(true), "move a uploaded file to the download cache")
-            ("max-concurrent-downloads", po::value<int>(),  max_download.c_str())
+            ("max-concurrent-downloads", po::value<int>(), max_download.c_str())
             ("max-concurrent-uploads", po::value<int>(), max_upload.c_str())
-            ("refresh-interval", po::value<int>()->default_value(300), "refresh interval in seconds")
-            ;
+            ("refresh-interval", po::value<int>()->default_value(300), "refresh interval in seconds");
 
     fuse_desc.add_options()
             ("fuse-foreground,f", "run the fuse application in foreground instead of a daemon")
             ("fuse-debug,d", "run the fuse application in debug mode")
             ("fuse-allow-other", "set the allow_other option for fuse")
             ("fuse-default-permissions", "set the default_permissions for fuse")
-            ("fuse-singlethread,s", "use a single thread for the fuse event loop")
-            ;
+            ("fuse-singlethread,s", "use a single thread for the fuse event loop");
 
     log_desc.add_options()
-            ("log-location", po::value<std::string>()->default_value("/tmp/DriveFS.log"), "sets the location for the log file")
-            ("log-max-size", po::value<std::string>()->default_value("104857600"),"sets the maximum log size, in bytes. default is 100M")
-            ("log-verbose,v", po::value<int>()->implicit_value(9), "log verbosee. if no  value is passed, log maximum verbose. valid values: [0-9]")
-            ;
+            ("log-location", po::value<std::string>()->default_value("/tmp/DriveFS.log"),
+             "sets the location for the log file")
+            ("log-max-size", po::value<std::string>()->default_value("104857600"),
+             "sets the maximum log size, in bytes. default is 100M")
+            ("log-verbose,v", po::value<int>()->implicit_value(9),
+             "log verbosee. if no  value is passed, log maximum verbose. valid values: [0-9]");
 
     po::positional_options_description p;
     p.add("mount", 1).add("other", -1);
@@ -58,8 +67,7 @@ int main(int argc, char **argv)
     po::store(po::command_line_parser(argc, argv).
             options(all_desc).positional(p).run(), vm);
 
-    if (vm.count("config-file"))
-    {
+    if (vm.count("config-file")) {
         std::ifstream ifs{vm["config-file"].as<std::string>().c_str()};
         if (ifs)
             store(po::parse_config_file(ifs, all_desc), vm);
@@ -73,8 +81,7 @@ int main(int argc, char **argv)
      *
      **************/
 
-    if (vm.count("help") || vm.count("mount") == 0)
-    {
+    if (vm.count("help") || vm.count("mount") == 0) {
         std::cout << "Usage:\n";
         std::cout << argv[0] << " mountpoint [options]"
                   << "\n\n";
@@ -90,18 +97,15 @@ int main(int argc, char **argv)
 
     const char *v1 = "DriveFS\0";
     char **v = nullptr;
-    if (vm.count("log-verbose"))
-    {
-        v = (char **)malloc(sizeof(char *) * 2);
-        v[0] = (char *)v1;
+    if (vm.count("log-verbose")) {
+        v = (char **) malloc(sizeof(char *) * 2);
+        v[0] = (char *) v1;
         auto str = std::to_string(vm["log-verbose"].as<int>());
-        v[1] = (char *)str.c_str();
+        v[1] = (char *) str.c_str();
         START_EASYLOGGINGPP(2, v);
-    }
-    else
-    {
-        v = (char **)malloc(sizeof(char *) * 1);
-        v[0] = (char *)v1;
+    } else {
+        v = (char **) malloc(sizeof(char *) * 1);
+        v[0] = (char *) v1;
         START_EASYLOGGINGPP(1, v);
     }
 
@@ -109,15 +113,12 @@ int main(int argc, char **argv)
     defaultConf.setToDefault();
     defaultConf.setGlobally(el::ConfigurationType::Format, "%datetime [%levshort] [%fbase:%line] %msg");
     const std::string log_location = vm["log-location"].as<std::string>();
-    if (log_location.empty())
-    {
+    if (log_location.empty()) {
         defaultConf.setGlobally(el::ConfigurationType::ToFile, "false");
-    }
-    else
-    {
+    } else {
         defaultConf.setGlobally(el::ConfigurationType::ToFile, "true");
         defaultConf.setGlobally(el::ConfigurationType::Filename, vm["log-location"].as<std::string>());
-        defaultConf.setGlobally(el::ConfigurationType ::MaxLogFileSize, vm["log-max-size"].as<std::string>());
+        defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, vm["log-max-size"].as<std::string>());
     }
 
     el::Loggers::reconfigureAllLoggers(defaultConf);
@@ -141,21 +142,15 @@ int main(int argc, char **argv)
     DriveFS::_Object::cache.m_block_download_size = DriveFS::FileIO::block_download_size;
     DriveFS::_Object::cache.maxCacheSize = vm["cache-size"].as<size_t>() * 1024 * 1024;
 
-    if (vm.count("max-concurrent-downloads"))
-    {
+    if (vm.count("max-concurrent-downloads")) {
         DriveFS::setMaxConcurrentDownload(vm["max-concurrent-downloads"].as<int>());
-    }
-    else
-    {
+    } else {
         DriveFS::setMaxConcurrentDownload(-1);
     }
 
-    if (vm.count("max-concurrent-uploads"))
-    {
+    if (vm.count("max-concurrent-uploads")) {
         DriveFS::setMaxConcurrentUpload(vm["max-concurrent-uploads"].as<int>());
-    }
-    else
-    {
+    } else {
         DriveFS::setMaxConcurrentUpload(-1);
     }
 
@@ -168,12 +163,11 @@ int main(int argc, char **argv)
     File::executing_gid = getegid();
 
     DriveFS::Account account = DriveFS::Account::getAccount(
-        vm["database"].as<std::string>());
+            vm["database"].as<std::string>());
     account.setRefreshInterval(vm["refresh-interval"].as<int>());
     DriveFS::FileIO::setAccount(&account);
     DriveFS::FileIO::maxCacheOnDisk = vm["cache-disk-size"].as<size_t>() * 1024 * 1024;
-    if (account.needToInitialize())
-    {
+    if (account.needToInitialize()) {
         account.run();
         LOG(INFO) << "Your DriveFS Account has been initialized";
         LOG(INFO) << "Restart DriveFS now.";
@@ -182,15 +176,14 @@ int main(int argc, char **argv)
     }
 
     SFAsync([&account]() {
-        try
-        {
-            LOG(INFO) << "Maximum cache disk size is " << DriveFS::FileIO::maxCacheOnDisk / 1024.0 / 1024.0 / 1024.0 << " GB";
+        try {
+            LOG(INFO) << "Maximum cache disk size is " << DriveFS::FileIO::maxCacheOnDisk / 1024.0 / 1024.0 / 1024.0
+                      << " GB";
             DriveFS::FileIO::checkCacheSize();
             LOG(INFO) << "Current size of cache is "
-                      << ((double)DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
+                      << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
         }
-        catch (std::exception &e)
-        {
+        catch (std::exception &e) {
             LOG(ERROR) << "There was an error with trying to calculate the initial size of the cache"
                        << "\n"
                        << e.what();
@@ -207,25 +200,21 @@ int main(int argc, char **argv)
 
     auto filesystemName = "DriveFS";
     fuse_args.push_back(&filesystemName[0]);
-    if (vm.count("fuse-foreground"))
-    {
+    if (vm.count("fuse-foreground")) {
         LOG(TRACE) << "will run fuse in foreground";
         fuse_args.push_back("-f");
     }
-    if (vm.count("fuse-debug"))
-    {
+    if (vm.count("fuse-debug")) {
         LOG(TRACE) << "will run fuse in debug";
         fuse_args.push_back("-d");
     }
-    if (vm.count("fuse-allow-other"))
-    {
+    if (vm.count("fuse-allow-other")) {
         LOG(TRACE) << "will run fuse with allow_other";
         fuse_args.push_back("-o");
         fuse_args.push_back("allow_other");
     }
 
-    if (vm.count("fuse-default-permissions"))
-    {
+    if (vm.count("fuse-default-permissions")) {
         LOG(TRACE) << "will run fuse with allow_other";
         fuse_args.push_back("-o");
         fuse_args.push_back("default_permissions");
@@ -242,10 +231,13 @@ int main(int argc, char **argv)
     }
 
     fuse_args.push_back("-o");
-    fuse_args.push_back("noautocache");
-
-    fuse_args.push_back("-o");
     fuse_args.push_back("splice_write");
+
+    {
+        std::stringstream ss;
+        ss << "fusermount -uz \"" << vm["mount"].as<std::string>() << "\"";
+        system(ss.str().c_str());
+    }
 #else
     fuse_args.push_back("-o");
     fuse_args.push_back("auto_unmount");
@@ -255,7 +247,7 @@ int main(int argc, char **argv)
 
     struct fuse_args args = FUSE_ARGS_INIT((int)fuse_args.size(), (char **)fuse_args.data());
     // struct fuse_lowlevel_ops ops = DriveFS::Filesystem::getOps();
-    struct fuse_lowlevel_ops ops = DriveFS::getOps();
+    struct fuse_lowlevel_ops ops = DriveFS::getOps();   
 
 #if FUSE_USE_VERSION >= 30
     struct fuse_cmdline_opts opts;

@@ -13,6 +13,7 @@
 #include "DownloadBuffer.h"
 #include <unistd.h>
 #include <sys/stat.h>
+#include <atomic>
 
 class File{
 
@@ -46,7 +47,7 @@ public:
 public:
     std::vector<WeakBuffer> *m_buffers; // a vector pointing to possible download m_buffers
     std::vector<heap_handle> *heap_handles;
-    std::atomic_uint64_t lookupCount; // for filesystem lookup count
+    std::atomic<int64_t> lookupCount; // for filesystem lookup count
 
     AutoResetEvent m_event;
 protected:

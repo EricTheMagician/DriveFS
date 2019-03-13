@@ -12,6 +12,7 @@
 #include <gdrive/FileIO.h>
 #include <pplx/pplxtasks.h>
 #include <regex>
+#include <mongocxx/instance.hpp>
 
 // using namespace utility;
 // using namespace web;
@@ -50,14 +51,30 @@ Account::Account(std::string dbUri)
     auto driveId = changeTokens["id"];
     if (res && driveId) {
       LOG(INFO) << "Previous change tokens founds";
-      auto s_driveId = driveId.get_utf8().value;
+      auto s_driveId = driveId.get_utf8().value.to_string();
       if (s_driveId == "root") {
-        m_newStartPageToken[std::string("")] = res.get_utf8();
+        m_newStartPageToken[std::string("")] = res.get_utf8().value.to_string();
       } else {
-            m_newStartPageToken[std::string(s_driveId)] =res.get_utf8();
+            m_newStartPageToken[std::string(s_driveId)] = res.get_utf8().value.to_string();
       }
     }
   }
+}
+
+Account::Account(Account &&account):BaseAccount(account.m_dbUri, "https://www.googleapis.com/drive/v3/",
+                                               "126857315828-tj5cie9scsk0b5edmakl266p7pis80ts.apps."
+                                               "googleusercontent.com",
+                                               "wxvtZ_SZpmEKXSB0kITXYx6C",
+                                               "https://accounts.google.com/o/oauth2/v2/auth",
+                                               "https://www.googleapis.com/oauth2/v4/token",
+                                               "http://localhost:7878", GDRIVE_OAUTH_SCOPE){
+  FileIO::setAccount(this);
+
+  upsert.upsert(true);
+  find_and_upsert.upsert(true);
+
+  m_newStartPageToken = std::move(account.m_newStartPageToken);
+
 }
 
 Account::Account(std::string dbUri, const std::string &at,
@@ -110,6 +127,7 @@ void Account::run_internal() {
 
   SFAsync(&Account::background_update, this, std::string(""));
 }
+static mongocxx::instance instance{};
 
 Account Account::getAccount(std::string suri) {
   LOG(TRACE) << "Getting Account";
@@ -127,8 +145,8 @@ Account Account::getAccount(std::string suri) {
   if (maybeResult) {
     LOG(INFO) << "Access tokens founds";
     auto res = maybeResult->view();
-    std::string at(res["access_token"].get_utf8()),
-        rt(res["refresh_token"].get_utf8());
+    std::string at(res["access_token"].get_utf8().value.to_string()),
+        rt(res["refresh_token"].get_utf8().value.to_string());
 
     if (!at.empty() && !rt.empty())
       return Account(suri, at, rt);
@@ -184,7 +202,7 @@ void Account::background_update(std::string teamDriveId) {
       if (nextPageTokenField) {
         auto sv = nextPageTokenField.get_utf8().value;
         if (!sv.empty()) {
-          m_newStartPageToken[teamDriveId] = sv;
+          m_newStartPageToken[teamDriveId] = sv.to_string();
         }
       }
 
@@ -192,8 +210,8 @@ void Account::background_update(std::string teamDriveId) {
       bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
       if (newStartPageToken) {
         auto temp = newStartPageToken.get_utf8().value;
-        if (!temp.empty() && temp != pageToken) {
-          m_newStartPageToken[teamDriveId] = temp;
+        if (!temp.empty() && temp.compare(pageToken) == 0) {
+          m_newStartPageToken[teamDriveId] = temp.to_string();
         }
       }
 
@@ -596,8 +614,8 @@ void Account::loadFilesAndFolders() {
   linkParentsAndChildren();
 }
 
-std::string Account::getFilesAndFolders(std::string_view nextPageToken, int backoff,
-                                        std::string_view teamDriveId) {
+std::string Account::getFilesAndFolders(absl::string_view nextPageToken, int backoff,
+                                        absl::string_view teamDriveId) {
 
   refresh_token();
   if (teamDriveId.empty()) {
@@ -651,7 +669,7 @@ std::string Account::getFilesAndFolders(std::string_view nextPageToken, int back
   // get next page token
   bsoncxx::document::element nextPageTokenField = value["nextPageToken"];
   nextPageToken =
-      nextPageTokenField ? nextPageTokenField.get_utf8().value : "";
+      nextPageTokenField ? std::string(nextPageTokenField.get_utf8().value) : "";
 
   // // get new start page token
   // bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
@@ -690,12 +708,12 @@ std::string Account::getFilesAndFolders(std::string_view nextPageToken, int back
 
     // get next page token
     bsoncxx::document::element startPageToken = changeValue["startPageToken"];
-    std::string newStartPageToken(startPageToken.get_utf8());
+    std::string newStartPageToken(startPageToken.get_utf8().value.to_string());
     m_newStartPageToken[teamDriveId.empty() ? "root" : std::string(teamDriveId)] =
         newStartPageToken;
     settings.find_one_and_update(
         document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
-                   << (teamDriveId.empty() ? "root" : teamDriveId) << finalize,
+                   << (teamDriveId.empty() ? "root" : std::string(teamDriveId)) << finalize,
         document{} << "$set" << open_document << "value" << newStartPageToken
                    << close_document << finalize,
         find_and_upsert);
@@ -855,7 +873,7 @@ void Account::getTeamDrives(int backoff) {
     for (const auto &drive : drives) {
       auto doc = drive.get_document();
       auto view = doc.view();
-      auto id = view["id"].get_utf8();
+      std::string id = view["id"].get_utf8().value.to_string();
       std::string nextPageToken = "";
       do {
         nextPageToken = getFilesAndFolders(nextPageToken, 0, id);
@@ -914,7 +932,7 @@ void Account::generateIds(int_fast8_t backoff) {
       bsoncxx::from_json(resp.extract_utf8string().get());
   auto view = doc.view();
   for (auto id : view["ids"].get_array().value) {
-    m_id_buffer.push_front(std::string(id.get_utf8()));
+    m_id_buffer.push_front(std::string(id.get_utf8().value.to_string()));
   }
 }
 
@@ -1301,7 +1319,7 @@ bool Account::upload(std::string uploadUrl, std::string filePath,
   }
 }
 
-std::optional<int64_t> Account::getResumableUploadPoint(std::string url,
+absl::optional<int64_t> Account::getResumableUploadPoint(std::string url,
                                                         size_t fileSize,
                                                         int backoff) {
   refresh_token();
@@ -1325,7 +1343,7 @@ std::optional<int64_t> Account::getResumableUploadPoint(std::string url,
   }
   int status_code = response.status_code();
   if (status_code == 404) {
-    return std::nullopt;
+    return absl::nullopt;
   }
   if (status_code == 308) {
     headers = response.headers();
@@ -1333,15 +1351,15 @@ std::optional<int64_t> Account::getResumableUploadPoint(std::string url,
     const std::regex numbers("-(\\d+)", std::regex_constants::icase);
     std::smatch match;
     if (std::regex_search(range, match, numbers) && match.size() > 1) {
-      return std::optional<int64_t>(
+      return absl::optional<int64_t>(
           (int64_t)std::strtoll(match.str(1).c_str(), nullptr, 10) + 1);
     } else {
-      return std::optional<int64_t>(0);
+      return absl::optional<int64_t>(0);
     }
   }
   if (status_code == 400) {
     LOG(DEBUG) << url;
-    return std::optional<int64_t>(-400);
+    return absl::optional<int64_t>(-400);
   }
 
   if (status_code >= 400) {
@@ -1357,7 +1375,7 @@ std::optional<int64_t> Account::getResumableUploadPoint(std::string url,
     }
   }
 
-  return std::nullopt;
+  return absl::nullopt;
 }
 
 bool Account::updateObjectProperties(std::string id, std::string json,

@@ -137,7 +137,7 @@ namespace DriveFS {
         static fs::path cachePath;
         static fs::path downloadPath;
         static fs::path  uploadPath;
-        static std::atomic_int64_t cacheSize;
+        static std::atomic<int64_t> cacheSize;
     public:
         static void setAccount(Account* account){
             m_account = account;

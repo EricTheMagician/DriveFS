@@ -44,7 +44,7 @@ namespace DriveFS{
     uint_fast8_t FileIO::number_of_blocks_to_read_ahead = 0;
     bool FileIO::download_last_chunk_at_the_beginning = false;
     bool FileIO::move_files_to_download_on_finish_upload = true;
-    std::atomic_int64_t FileIO::cacheSize = 0;
+    std::atomic<int64_t> FileIO::cacheSize(0);
     Account* FileIO::m_account = nullptr;
     int64_t FileIO::maxCacheOnDisk = 0;
 
@@ -226,7 +226,7 @@ namespace DriveFS{
 
         //write buffer to disk
         boost::asio::defer(WritePool,
-                           [cacheName, weak_obj = std::weak_ptr(cache)]() -> void {
+                           [cacheName, weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                auto strong_cache = weak_obj.lock();
                                if (strong_cache && !(strong_cache->isInvalid)) {
                                    fs::path path = cachePath / "download" / cacheName;
@@ -471,8 +471,7 @@ namespace DriveFS{
                 if (temp >= fileSize){
                     break;
                 }
-                auto path_to_buffer2 = FileIO::cachePath;
-                path_to_buffer2 /= "download";
+                auto path_to_buffer2 = FileIO::downloadPath;
                 path_to_buffer2 /= m_file->getId() + "-" + std::to_string(start);
                 if(!fs::exists(path_to_buffer2)) {
                     chunksToDownload.push_back(temp / block_download_size);
@@ -507,7 +506,7 @@ namespace DriveFS{
 
                     if( (fs::exists(path) && (fs::file_size(path) == block_download_size|| _chunkNumber == getChunkNumber(m_file->getFileSize(), block_download_size))) && (!item) ) {
                         boost::asio::defer(*ReadPool,
-                                           [io = this, start, chunkSize, path, weak_obj = std::weak_ptr(cache)]() -> void {
+                                           [io = this, start, chunkSize, path, weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                                auto strong_obj = weak_obj.lock();
 
                                                if (strong_obj) {
@@ -538,7 +537,7 @@ namespace DriveFS{
                                            });
                     } else {
                             boost::asio::defer(*DownloadPool,
-                               [start, chunkSize, path, weak_file = std::weak_ptr(m_file), weak_obj = std::weak_ptr(cache)]() -> void {
+                               [start, chunkSize, path, weak_file = std::weak_ptr<_Object>(m_file), weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                    auto strong_obj = weak_obj.lock();
                                    auto strong_file = weak_file.lock();
 

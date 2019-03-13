@@ -112,11 +112,12 @@ protected:
   std::unique_ptr<oauth2_code_listener> m_listener;
   std::string m_apiEndpoint;
   AutoResetEvent m_event;
+  std::string m_dbUri;
   std::string m_key;
   std::string m_refresh_token;
   std::chrono::system_clock::time_point m_token_expires_at;
-  std::atomic<ino_t> inode_count = 1;
-  int refresh_interval = 300;
+  std::atomic<ino_t> inode_count;
+  int refresh_interval;
   bool m_needToInitialize;
 
 public:

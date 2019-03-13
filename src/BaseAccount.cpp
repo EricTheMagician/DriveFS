@@ -114,18 +114,25 @@ BaseAccount::BaseAccount(std::string dbUri, std::string api, std::string id,
                          std::string secret, std::string auth,
                          std::string token, std::string redirect,
                          std::string scope)
-    : m_apiEndpoint(api),
+    : m_dbUri(dbUri), m_apiEndpoint(api),
       m_oauth2_config(id, secret, auth, token, redirect, scope, "test/0.0.1"),
       m_listener(new oauth2_code_listener(redirect, m_oauth2_config)),
       m_needToInitialize(true), m_event(1), m_key(id),
       m_token_expires_at(std::chrono::system_clock::now()),
-      pool(mongocxx::uri(dbUri)), refresh_interval(300){};
-
+      pool(mongocxx::uri(dbUri)), refresh_interval(300),
+      inode_count(1){};
+//BaseAccount(dbUri, "https://www.googleapis.com/drive/v3/",
+//                  "126857315828-tj5cie9scsk0b5edmakl266p7pis80ts.apps."
+//                  "googleusercontent.com",
+//                  "wxvtZ_SZpmEKXSB0kITXYx6C",
+//                  "https://accounts.google.com/o/oauth2/v2/auth",
+//                  "https://www.googleapis.com/oauth2/v4/token",
+//                  "http://localhost:7878", GDRIVE_OAUTH_SCOPE)
 void BaseAccount::open_browser_auth() {
   auto auth_uri(m_oauth2_config.build_authorization_uri(true));
-  ucout << "Opening browser in URI:" << std::endl;
+  ucout << "Open the browser and visit the following page:" << std::endl;
   ucout << auth_uri << std::endl;
-  open_browser(auth_uri);
+
 }
 
 BaseAccount::~BaseAccount() {}

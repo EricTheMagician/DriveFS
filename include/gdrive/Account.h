@@ -18,7 +18,8 @@
 #include <bsoncxx/document/view.hpp>
 #include <bsoncxx/json.hpp>
 #include <cpprest/http_client.h>
-#include <string_view>
+#include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
 
 using namespace web::http::client; // HTTP client features
 using namespace web::http::oauth2::experimental;
@@ -42,6 +43,7 @@ public:
   Account(std::string dbUri, const std::string &access_tokoen,
           const std::string &refresh_token);
 
+  Account(Account &&acount);
   static Account getAccount(std::string uri);
 
   inline void refresh_token(int backoff = 0)
@@ -61,7 +63,7 @@ public:
   virtual bool upload(std::string uploadUrl, std::string filePath,
                       size_t fileSize, int64_t start = 0,
                       std::string mimeType = "application/octet-stream");
-  std::optional<int64_t>
+  absl::optional<int64_t>
   getResumableUploadPoint(std::string url, size_t fileSize, int backoff = 0);
   virtual bool updateObjectProperties(std::string id, std::string json,
                                       std::string addParents = "",
@@ -73,9 +75,9 @@ public:
 protected:
   void run_internal() override;
   virtual void loadFilesAndFolders() override;
-  [[nodiscard]] virtual std::string getFilesAndFolders(std::string_view nextPageToken = "",
+  [[nodiscard]] virtual std::string getFilesAndFolders(absl::string_view nextPageToken = "",
                                   int backoff = 0,
-                                  std::string_view teamDriveId="");
+                                  absl::string_view teamDriveId="");
 
 private:
   void parseFilesAndFolders(bsoncxx::document::view value);
@@ -103,8 +105,8 @@ private:
 
 }; // namespace DriveFS
 
-constexpr std::string_view DATABASEDATA = "GDriveData";
-constexpr std::string_view DATABASESETTINGS = "settings";
-constexpr std::string_view DATABASENAME = "DriveFS";
-constexpr std::string_view GDRIVETOKENNAME = "gdrive_tokens";
-constexpr std::string_view GDRIVELASTCHANGETOKEN = "gdrive last change token";
+constexpr absl::string_view DATABASEDATA = "GDriveData";
+constexpr absl::string_view DATABASESETTINGS = "settings";
+constexpr absl::string_view DATABASENAME = "DriveFS";
+constexpr absl::string_view GDRIVETOKENNAME = "gdrive_tokens";
+constexpr absl::string_view GDRIVELASTCHANGETOKEN = "gdrive last change token";
