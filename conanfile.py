@@ -5,7 +5,7 @@ class DriveFSConan(ConanFile):
 
     # conan remote add public-conan https://api.bintray.com/conan/bincrafters/public-conan
     # conan remote add bisect https://api.bintray.com/conan/bisect/bisect
-    # conan remote add ess-dmsc https://api.bintray.com/conan/ess-dmsc/conan \
+    # conan remote add ess-dmsc https://api.bintray.com/conan/ess-dmsc/conan
 
     requires = (
             "boost/1.69.0@conan/stable",  "mongo-cxx-driver/3.3.0@bisect/stable",

@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 
 namespace {
     enum level { LOG_DEBUG };

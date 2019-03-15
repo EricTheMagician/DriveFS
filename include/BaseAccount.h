@@ -112,6 +112,7 @@ protected:
   std::unique_ptr<oauth2_code_listener> m_listener;
   std::string m_apiEndpoint;
   AutoResetEvent m_event;
+  std::string m_redirect;
   std::string m_dbUri;
   std::string m_key;
   std::string m_refresh_token;
