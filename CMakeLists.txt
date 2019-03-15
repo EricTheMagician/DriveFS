@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.9)
 project(DriveFS CXX)
 
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_FLAGS -std=c++11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS -std=c++17)
 
 set(common_src_files 
         # semaphore
@@ -148,11 +148,9 @@ target_link_libraries(${PROJECT_NAME}
         CONAN_PKG::OpenSSL
         CONAN_PKG::cpprestsdk
         CONAN_PKG::mongo-cxx-driver
-        CONAN_PKG::abseil
         ${JEMALLOC_LIB}
 
-#        ${TCMALLOC_LIB}
-        )
+)
 
 target_compile_definitions(${PROJECT_NAME}
       PUBLIC

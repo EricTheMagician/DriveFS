@@ -32,7 +32,7 @@ Account::Account(std::string dbUri)
                   "wxvtZ_SZpmEKXSB0kITXYx6C",
                   "https://accounts.google.com/o/oauth2/v2/auth",
                   "https://www.googleapis.com/oauth2/v4/token",
-                  "http://localhost:7878", GDRIVE_OAUTH_SCOPE),
+                  "http://localhost:7179", GDRIVE_OAUTH_SCOPE),
       m_id_buffer(10) {
   FileIO::setAccount(this);
 
@@ -51,11 +51,11 @@ Account::Account(std::string dbUri)
     auto driveId = changeTokens["id"];
     if (res && driveId) {
       LOG(INFO) << "Previous change tokens founds";
-      auto s_driveId = driveId.get_utf8().value.to_string();
+      auto s_driveId = driveId.get_utf8().value;
       if (s_driveId == "root") {
-        m_newStartPageToken[std::string("")] = res.get_utf8().value.to_string();
+        m_newStartPageToken[std::string("")] = res.get_utf8().value;
       } else {
-            m_newStartPageToken[std::string(s_driveId)] = res.get_utf8().value.to_string();
+            m_newStartPageToken[std::string(s_driveId)] = res.get_utf8().value;
       }
     }
   }
@@ -145,8 +145,8 @@ Account Account::getAccount(std::string suri) {
   if (maybeResult) {
     LOG(INFO) << "Access tokens founds";
     auto res = maybeResult->view();
-    std::string at(res["access_token"].get_utf8().value.to_string()),
-        rt(res["refresh_token"].get_utf8().value.to_string());
+    std::string at(res["access_token"].get_utf8().value),
+        rt(res["refresh_token"].get_utf8().value);
 
     if (!at.empty() && !rt.empty())
       return Account(suri, at, rt);
@@ -202,7 +202,7 @@ void Account::background_update(std::string teamDriveId) {
       if (nextPageTokenField) {
         auto sv = nextPageTokenField.get_utf8().value;
         if (!sv.empty()) {
-          m_newStartPageToken[teamDriveId] = sv.to_string();
+          m_newStartPageToken[teamDriveId] = sv;
         }
       }
 
@@ -211,7 +211,7 @@ void Account::background_update(std::string teamDriveId) {
       if (newStartPageToken) {
         auto temp = newStartPageToken.get_utf8().value;
         if (!temp.empty() && temp.compare(pageToken) == 0) {
-          m_newStartPageToken[teamDriveId] = temp.to_string();
+          m_newStartPageToken[teamDriveId] = temp;
         }
       }
 
@@ -614,8 +614,8 @@ void Account::loadFilesAndFolders() {
   linkParentsAndChildren();
 }
 
-std::string Account::getFilesAndFolders(absl::string_view nextPageToken, int backoff,
-                                        absl::string_view teamDriveId) {
+std::string Account::getFilesAndFolders(std::string_view nextPageToken, int backoff,
+                                        std::string_view teamDriveId) {
 
   refresh_token();
   if (teamDriveId.empty()) {
@@ -675,10 +675,10 @@ std::string Account::getFilesAndFolders(absl::string_view nextPageToken, int bac
   // bsoncxx::document::element newStartPageToken = value["newStartPageToken"];
   // if (nextPageTokenField) {
   //   m_newStartPageToken[teamDriveId] =
-  //       nextPageTokenField.get_utf8().value.to_string();
+  //       nextPageTokenField.get_utf8().value;
   // } else if (newStartPageToken) {
   //   m_newStartPageToken[teamDriveId] =
-  //       newStartPageToken.get_utf8().value.to_string();
+  //       newStartPageToken.get_utf8().value;
   // }
   boost::asio::defer(*parseFilesAndFolderThreadPool,
                      [docToParse = std::move(doc), this]() -> void {
@@ -708,7 +708,7 @@ std::string Account::getFilesAndFolders(absl::string_view nextPageToken, int bac
 
     // get next page token
     bsoncxx::document::element startPageToken = changeValue["startPageToken"];
-    std::string newStartPageToken(startPageToken.get_utf8().value.to_string());
+    std::string newStartPageToken(startPageToken.get_utf8().value);
     m_newStartPageToken[teamDriveId.empty() ? "root" : std::string(teamDriveId)] =
         newStartPageToken;
     settings.find_one_and_update(
@@ -873,7 +873,7 @@ void Account::getTeamDrives(int backoff) {
     for (const auto &drive : drives) {
       auto doc = drive.get_document();
       auto view = doc.view();
-      std::string id = view["id"].get_utf8().value.to_string();
+      std::string id { view["id"].get_utf8().value };
       std::string nextPageToken = "";
       do {
         nextPageToken = getFilesAndFolders(nextPageToken, 0, id);
@@ -932,7 +932,7 @@ void Account::generateIds(int_fast8_t backoff) {
       bsoncxx::from_json(resp.extract_utf8string().get());
   auto view = doc.view();
   for (auto id : view["ids"].get_array().value) {
-    m_id_buffer.push_front(std::string(id.get_utf8().value.to_string()));
+    m_id_buffer.push_front(std::string(id.get_utf8().value));
   }
 }
 
@@ -1319,7 +1319,7 @@ bool Account::upload(std::string uploadUrl, std::string filePath,
   }
 }
 
-absl::optional<int64_t> Account::getResumableUploadPoint(std::string url,
+std::optional<int64_t> Account::getResumableUploadPoint(std::string url,
                                                         size_t fileSize,
                                                         int backoff) {
   refresh_token();
@@ -1343,7 +1343,7 @@ absl::optional<int64_t> Account::getResumableUploadPoint(std::string url,
   }
   int status_code = response.status_code();
   if (status_code == 404) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   if (status_code == 308) {
     headers = response.headers();
@@ -1351,15 +1351,15 @@ absl::optional<int64_t> Account::getResumableUploadPoint(std::string url,
     const std::regex numbers("-(\\d+)", std::regex_constants::icase);
     std::smatch match;
     if (std::regex_search(range, match, numbers) && match.size() > 1) {
-      return absl::optional<int64_t>(
+      return std::optional<int64_t>(
           (int64_t)std::strtoll(match.str(1).c_str(), nullptr, 10) + 1);
     } else {
-      return absl::optional<int64_t>(0);
+      return std::optional<int64_t>(0);
     }
   }
   if (status_code == 400) {
     LOG(DEBUG) << url;
-    return absl::optional<int64_t>(-400);
+    return std::optional<int64_t>(-400);
   }
 
   if (status_code >= 400) {
@@ -1375,7 +1375,7 @@ absl::optional<int64_t> Account::getResumableUploadPoint(std::string url,
     }
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 bool Account::updateObjectProperties(std::string id, std::string json,

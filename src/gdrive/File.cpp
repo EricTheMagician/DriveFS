@@ -7,7 +7,7 @@
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/array.hpp>
-
+#include <string_view>
 #include "adaptive_time_parser.h"
 #define ONLY_C_LOCALE 1
 #include "date.h"
@@ -26,9 +26,10 @@ static adaptive::datetime::adaptive_parser parser { adaptive::datetime::adaptive
 } };
 
 
-struct timespec getTimeFromRFC3339String(std::string str_date){
+struct timespec getTimeFromRFC3339String(std::string_view str_date){
     date::sys_time<std::chrono::milliseconds> tp;
-    std::stringstream ss(str_date);
+    std::stringstream ss;
+    ss << str_date;
     ss >> date::parse("%FT%TZ", tp);
     int64_t epoch = tp.time_since_epoch().count();
     return {epoch/1000, epoch % 1000};
@@ -151,7 +152,7 @@ namespace DriveFS{
     {
         attribute.st_ino = ino;
         attribute.st_blksize = 1;
-        m_id = document["id"].get_utf8().value.to_string();
+        m_id = document["id"].get_utf8().value;
 
         auto f = document["mimeType"];
         if(f.get_utf8().value.compare("application/vnd.google-apps.folder") == 0){
@@ -179,7 +180,7 @@ namespace DriveFS{
             auto md5 = document["md5Checksum"];
             if(md5){
                 isUploaded = true;
-                md5Checksum = md5.get_utf8().value.to_string();
+                md5Checksum = md5.get_utf8().value;
             }else if(attribute.st_size == 0){
                 isUploaded = true;
             }else{
@@ -204,9 +205,9 @@ namespace DriveFS{
         }
 
         trashed = document["trashed"].get_bool().value;
-        m_name = document["name"].get_utf8().value.to_string();
-        attribute.st_mtim = getTimeFromRFC3339String(document["modifiedTime"].get_utf8().value.to_string());
-        attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value.to_string());
+        m_name = document["name"].get_utf8().value;
+        attribute.st_mtim = getTimeFromRFC3339String(document["modifiedTime"].get_utf8().value);
+        attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value);
         attribute.st_atim = attribute.st_mtim;
         attribute.st_nlink = 1;
         attribute.st_uid = executing_uid;
@@ -230,7 +231,7 @@ namespace DriveFS{
         f.attribute.st_gid = executing_gid;
 
         f.isFolder = true;
-        std::string id(document["id"].get_utf8().value.to_string());
+        std::string id(document["id"].get_utf8().value);
         f.m_id = id;
         auto sf = std::make_shared<_Object>(f);
         _Object::idToObject[id] = sf;
@@ -288,10 +289,10 @@ namespace DriveFS{
         f.attribute.st_nlink = 1;
         f.attribute.st_uid = executing_uid;
         f.attribute.st_gid = executing_gid;
-        f.m_name = document["name"].get_utf8().value.to_string();
+        f.m_name = document["name"].get_utf8().value;
 
         f.isFolder = true;
-        std::string id(document["id"].get_utf8().value.to_string());
+        std::string id(document["id"].get_utf8().value);
         f.m_id = id;
         auto sf = std::make_shared<_Object>(f);
         _Object::idToObject[id] = sf;
@@ -341,7 +342,7 @@ namespace DriveFS{
             auto md5 = document["md5Checksum"];
             if(md5){
                 isUploaded = true;
-                md5Checksum = md5.get_utf8().value.to_string();
+                md5Checksum = md5.get_utf8().value;
             }else if(attribute.st_size == 0){
                 isUploaded = true;
             }else{
@@ -363,9 +364,9 @@ namespace DriveFS{
             }
         }
         trashed = document["trashed"].get_bool().value;
-        m_name = document["name"].get_utf8().value.to_string();
-        attribute.st_mtim = getTimeFromRFC3339String(document["modifiedTime"].get_utf8().value.to_string());
-        attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value.to_string());
+        m_name = document["name"].get_utf8().value;
+        attribute.st_mtim = getTimeFromRFC3339String(document["modifiedTime"].get_utf8().value);
+        attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value);
         updateProperties(document);
     }
 
@@ -382,7 +383,7 @@ namespace DriveFS{
                 }else if(maybeProperty.type() == bsoncxx::type::k_int64){
                     attribute.st_uid = maybeProperty.get_int64();
                 }else if(maybeProperty.type() == bsoncxx::type::k_utf8){
-                    attribute.st_uid = std::strtoul(maybeProperty.get_utf8().value.to_string().c_str(), nullptr, 10);
+                    attribute.st_uid = std::strtoul(std::string(maybeProperty.get_utf8().value).c_str(), nullptr, 10);
                 }else{
                     LOG(INFO)<< "type is " << (uint8_t) maybeProperty.type();
 //                    attribute.st_uid = maybeProperty.get_int64();
@@ -397,7 +398,7 @@ namespace DriveFS{
                 }else if(maybeProperty.type() == bsoncxx::type::k_int64){
                     attribute.st_gid = maybeProperty.get_int64();
                 }else if(maybeProperty.type() == bsoncxx::type::k_utf8){
-                    attribute.st_gid = std::strtoul(maybeProperty.get_utf8().value.to_string().c_str(), nullptr, 10);
+                    attribute.st_gid = std::strtoul(std::string(maybeProperty.get_utf8().value).c_str(), nullptr, 10);
                 }else{
  //                   attribute.st_gid = maybeProperty.get_int32();
                 }
@@ -410,7 +411,7 @@ namespace DriveFS{
                 }else if(maybeProperty.type() == bsoncxx::type::k_int64){
                     attribute.st_mode = maybeProperty.get_int64();
                 }else if(maybeProperty.type() == bsoncxx::type::k_utf8){
-                    attribute.st_mode = std::strtoul(maybeProperty.get_utf8().value.to_string().c_str(), nullptr, 10);
+                    attribute.st_mode = std::strtoul(std::string(maybeProperty.get_utf8().value).c_str(), nullptr, 10);
                 }else{
    ///                 attribute.st_mode = maybeProperty.get_int32();
                 }

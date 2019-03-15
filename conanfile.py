@@ -2,16 +2,20 @@ from conans import ConanFile, CMake
 
 class DriveFSConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch", "cppstd"
-    requires = ("boost/1.69.0@conan/stable",  "mongo-cxx-driver/3.2.0@bincrafters/stable",
-    "mongo-c-driver/1.9.4@bincrafters/stable", "cpprestsdk/2.10.10@bincrafters/stable",
-    "abseil/20180600@bincrafters/stable","OpenSSL/1.0.2r@conan/stable",
-    "jemalloc/5.0.1@ess-dmsc/stable"
+
+    # conan remote add public-conan https://api.bintray.com/conan/bincrafters/public-conan
+    # conan remote add bisect https://api.bintray.com/conan/bisect/bisect
+    # conan remote add ess-dmsc https://api.bintray.com/conan/ess-dmsc/conan \
+
+    requires = (
+            "boost/1.69.0@conan/stable",  "mongo-cxx-driver/3.3.0@bisect/stable",
+            "cpprestsdk/2.10.10@bincrafters/stable","OpenSSL/1.0.2r@conan/stable",
+            "jemalloc/5.0.1@ess-dmsc/stable"
     )
 
     generators = "cmake"
-    default_options = {"OpenSSL:shared": False, "boost:shared": False,
-        "mongo-cxx-driver:shared": False, "mongo-c-driver:shared": False, "cpprestsdk:shared": False,
-        "jemalloc:shared": False
+    default_options = {"OpenSSL:shared": False, "boost:shared": False, 
+            "cpprestsdk:shared": False, "jemalloc:shared": False
     }
     build_policy = "missing"
 

@@ -107,6 +107,9 @@ void BaseAccount::run() {
 
 pplx::task<bool> BaseAccount::authorization_code_flow() {
   open_browser_auth();
+  if(!m_listener){
+      m_listener = std::make_unique<oauth2_code_listener>(m_redirect, m_oauth2_config);
+  }
   return m_listener->listen_for_code();
 }
 
@@ -115,8 +118,9 @@ BaseAccount::BaseAccount(std::string dbUri, std::string api, std::string id,
                          std::string token, std::string redirect,
                          std::string scope)
     : m_dbUri(dbUri), m_apiEndpoint(api),
+      m_redirect(redirect),
       m_oauth2_config(id, secret, auth, token, redirect, scope, "test/0.0.1"),
-      m_listener(new oauth2_code_listener(redirect, m_oauth2_config)),
+      m_listener(nullptr),
       m_needToInitialize(true), m_event(1), m_key(id),
       m_token_expires_at(std::chrono::system_clock::now()),
       pool(mongocxx::uri(dbUri)), refresh_interval(300),
