@@ -4,6 +4,11 @@ project(DriveFS CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS -std=c++17)
 
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+endif()
+
 set(common_src_files 
         # semaphore
         external/semaphore/common/autoresetevent.h
@@ -116,39 +121,31 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 #        ${CMAKE_BINARY_DIR}/include
         )
 
+
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 #set(CMAKE_MODULE_PATH /usr/local/include/mongocxx/v_noabi/mongocxx/cmake)
 #find_package(mongocxx REQUIRED)
 
 
-
 #SET(Boost_USE_MULTITHREAD ON)
 #SET(BOOST_ROOT ${CONAN_BOOST_ROOT})
 #find_package(Boost 1.66.0 COMPONENTS thread system program_options filesystem REQUIRED)
-
+#set(OPENSSL_ROOT_DIR ${CONAN_OPENSSL_ROOT})
+#set(OPENSSL_USE_STATIC_LIBS FALSE)
+#set(OPENSSL_CRYPTO_LIBRARY ${CONAN_OPENSSL_ROOT}/lib)
 #find_package(OpenSSL 1.0 EXACT REQUIRED )
-#find_package(OpenSSL REQUIRED )
 
-#include(./cmake/libcpprestsdk.cmake)
-#include(./cmake/libmongocxx.cmake)
-#MESSAGE("OPENSSL LIBRRAIES are :    ${OPENSSL_SSL_LIBBRARY} ${OPENSSL_CRYPTO_LIBBRARY}")
-#MESSAGE("${OPENSSL_SSL_LIBBRARY}")
-#MESSAGE("${OPENSSL_CRYPTO_LIBBRARY}")
 MESSAGE("fuse libraries are: ${LIBFUSE_LIBRARIES}")
-# find_library(TCMALLOC_LIB NAMES tcmalloc tcmalloc-minimal libtcmalloc.so.4 libtcmalloc_minimal.so.4 HINTS /usr/lib /usr/lib/x86_64-linux-gnu)
-#find_library(JEMALLOC_LIB NAMES jemalloc libjemalloc.so.1 HINTS /usr/lib /usr/lib/x86_64-linux-gnu)
-find_library(JEMALLOC_LIB NAMES jemalloc jemalloc_pic HINTS ${CONAN_LIB_DIRS_JEMALLOC})
-#add_dependencies(${PROJECT_NAME} cpprest mongocxx)
-target_link_libraries(${PROJECT_NAME}
-        pthread_nonshared.a
 
+target_link_libraries(${PROJECT_NAME}
+        CONAN_PKG::jemalloc
+        pthread_nonshared.a
         ${LIBFUSE_LIBRARIES}
         CONAN_PKG::boost
         CONAN_PKG::OpenSSL
         CONAN_PKG::cpprestsdk
         CONAN_PKG::mongo-cxx-driver
-        ${JEMALLOC_LIB}
 
 )
 
