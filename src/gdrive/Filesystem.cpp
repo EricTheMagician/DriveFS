@@ -206,7 +206,7 @@ namespace DriveFS{
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
         auto *account = getAccount(req);
         GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
-        _lockObject lock { parent.get() };
+        parent->m_event.wait();
         bool signaled = false;
         auto children = &(parent->children);
 
@@ -214,17 +214,17 @@ namespace DriveFS{
             auto child = (*children)[i];
             if (child->getName().compare(name) == 0) {
                 children->erase(children->begin() + i);
+                child->trash();
+                parent->m_event.signal();
                 signaled = true;
 
                 LOG(TRACE) << "Deleting file/folder with name " << name << " and parentId: "  << parent->getId();
 
                 if (child->getIsUploaded()) {
-                    _lockObject lock { child.get() };
-                    account->removeChildFromParent(child, parent);
-                    child->trash();
+                    {
+                        account->removeChildFromParent(child, parent);
+                    }
                 }else{
-                    _lockObject lock {child.get()};
-                    child->trash();
                     parent->removeChild(child);
                     child->removeParent(parent);
                     if(child->parents.empty()) {
@@ -668,6 +668,8 @@ namespace DriveFS{
 
         FolderIO *io = new FolderIO(req, object->children.size());
         for (auto child: object->children) {
+            if(child->getIsTrashed())
+                continue;
             io->addDirEntry(child->getName().c_str(), child->attribute);
         }
         io->done();
