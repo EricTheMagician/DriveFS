@@ -106,17 +106,15 @@ namespace DriveFS{
 
     void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi){
         auto file = getObjectFromInodeAndReq(req, ino);
-        if(!file){
+        if(!file) {
             int reply_err = fuse_reply_err(req, ENOENT);
-            while(reply_err != 0){
+            while (reply_err != 0) {
                 reply_err = fuse_reply_err(req, ENOENT);
             }
             return;
         }
-        _lockObject lock {file.get()};
 
         if(to_set & FUSE_SET_ATTR_SIZE){
-            file->m_event.signal();
             LOG(ERROR) << "Attempted to set size to file with name " << file->getName() << " and id " << file->getId();
             LOG(ERROR) << "Settingg the file size is currently not supported";
             int reply_err = fuse_reply_err(req, EIO);
@@ -126,7 +124,7 @@ namespace DriveFS{
 
             return;
         }
-
+        file->m_event.wait();
         if(to_set & FUSE_SET_ATTR_MODE){
             file->attribute.st_mode = attr->st_mode;
         }
@@ -151,6 +149,7 @@ namespace DriveFS{
             file->attribute.st_atim = {time(nullptr),0};
         }
 
+        file->m_event.signal();
         if(file->getIsUploaded()){
             auto account = getAccount(req);
             const bool status = account->updateObjectProperties(file->getId(), bsoncxx::to_json(file->to_rename_bson()));
