@@ -4,9 +4,6 @@
 
 #include "gdrive/File.h"
 #include "gdrive/FileIO.h"
-#include <bsoncxx/builder/stream/document.hpp>
-#include <bsoncxx/builder/basic/document.hpp>
-#include <bsoncxx/builder/basic/array.hpp>
 #include <string_view>
 #include "adaptive_time_parser.h"
 #define ONLY_C_LOCALE 1
@@ -14,7 +11,9 @@
 #undef ONLY_C_LOCALE
 #include <ctime>
 #include <easylogging++.h>
+#include "Database.h"
 
+constexpr std::string_view google_folder_type = "application/vnd.google-apps.folder";
 
 #define APP_UID "driveFS_uid"
 #define APP_GID "driveFS_gid"
@@ -55,10 +54,6 @@ std::string getRFC3339StringFromTime(const struct timespec &time){
 
 namespace DriveFS{
 
-    std::map<ino_t, GDriveObject> _Object::inodeToObject;
-    std::map<std::string, GDriveObject> _Object::idToObject;
-    PriorityCache<GDriveObject>_Object::cache(1,1);
-    ::AutoResetEvent _Object::insertEvent(1);
 
     _Object::_Object():File(), isUploaded(false){
     }
@@ -97,8 +92,6 @@ namespace DriveFS{
 
     _Object::_Object(const DriveFS::_Object& that):File() {
         lookupCount = that.lookupCount.load(std::memory_order_acquire);
-        parents = that.parents;
-        children = that.children;
         m_name = that.m_name;
         trashed = that.trashed;
         starred = that.starred;
@@ -111,23 +104,21 @@ namespace DriveFS{
         isTrashable = that.isTrashable;
         canRename = that.canRename;
         attribute = that.attribute;
-        if (that.m_buffers != nullptr) {
-            m_buffers = new std::vector<WeakBuffer>(*(that.m_buffers));
-        }else{
-            m_buffers = nullptr;
-        }
-        if(that.heap_handles != nullptr){
-            heap_handles = new std::vector<heap_handle>(*(that.heap_handles));
-        }else{
-            heap_handles = nullptr;
-        }
+//        if (that.m_buffers != nullptr) {
+//            m_buffers = new std::vector<WeakBuffer>(*(that.m_buffers));
+//        }else{
+//            m_buffers = nullptr;
+//        }
+//        if(that.heap_handles != nullptr){
+//            heap_handles = new std::vector<heap_handle>(*(that.heap_handles));
+//        }else{
+//            heap_handles = nullptr;
+//        }
         isUploaded = that.isUploaded;
     }
 
     _Object::_Object(DriveFS::_Object&& that): File(){
         lookupCount = that.lookupCount.load(std::memory_order_acquire);
-        parents = std::move(that.parents);
-        children = std::move(that.children);
         m_name = std::move(that.m_name);
         trashed = that.trashed;
         starred = that.starred;
@@ -140,180 +131,55 @@ namespace DriveFS{
         isTrashable = that.isTrashable;
         canRename = that.canRename;
         attribute = std::move(that.attribute);
-        m_buffers = that.m_buffers;
-        that.m_buffers = nullptr;
-        heap_handles = that.heap_handles;
-        that.heap_handles = nullptr;
+//        m_buffers = that.m_buffers;
+//        that.m_buffers = nullptr;
+//        heap_handles = that.heap_handles;
+//        that.heap_handles = nullptr;
         isUploaded = that.isUploaded;
     }
+    _Object::_Object(ino_t inode, std::string const &id, std::string &&name,
+                     std::string &&modifiedDate, std::string &&createdDate,
+            std::string &&mimeType, size_t &&size, std::string &&md5,
+            int uid, int gid, int mode, bool trashed): File(name.c_str()),
+            isFolder(mimeType==google_folder_type),
+            m_id(std::move(id)),
+            trashed(trashed)
 
-    _Object::_Object(ino_t ino, bsoncxx::document::view document):File(),
-        isUploaded(true), starred(false)
-    {
-        attribute.st_ino = ino;
-        attribute.st_blksize = 1;
-        m_id = document["id"].get_utf8().value;
-
-        auto f = document["mimeType"];
-        if(f.get_utf8().value.compare("application/vnd.google-apps.folder") == 0){
-            isFolder = true;
+            {
+        struct stat &attribute = this->attribute;
+        if(this->isFolder){
             attribute.st_mode = S_IFDIR | S_IXUSR | S_IXGRP | S_IXOTH;
             attribute.st_size = 4096;
             attribute.st_blocks = 0;
-            isUploaded = true;
+            this->isUploaded = true;
         }else{
-            isFolder = false;
             attribute.st_mode = S_IFREG | S_IXUSR | S_IXGRP | S_IXOTH;
-            auto sz = document["size"];
-            if(sz){
-                attribute.st_size = std::strtoll(std::string(sz.get_utf8().value).c_str(), nullptr, 10);
-            }else{
-                sz = document["quotaBytesUsed"];
-                if(sz){
-                    attribute.st_size = std::strtoll(std::string(sz.get_utf8().value).c_str(), nullptr, 10);
-                }else {
-                    attribute.st_size = 0;
-                }
-
-            }
-            attribute.st_blocks = attribute.st_size / S_BLKSIZE + std::min<int64_t>(attribute.st_size % S_BLKSIZE,1);
-            auto md5 = document["md5Checksum"];
-            if(md5){
-                isUploaded = true;
-                md5Checksum = md5.get_utf8().value;
+            attribute.st_size = size;
+            attribute.st_blocks = attribute.st_size / S_BLKSIZE + std::min<decltype(attribute.st_size)>(attribute.st_size % S_BLKSIZE,1);
+            if(!md5.empty()){
+                this->isUploaded = true;
+                this->md5Checksum = std::move(md5);
             }else if(attribute.st_size == 0){
-                isUploaded = true;
+                this->isUploaded = true;
             }else{
-                isUploaded = false;
+                this->isUploaded = false;
             }
-
-//            createVectorsForBuffers();
-
         }
 
-        auto maybeCapabilities = document["capabilities"];
-        if(maybeCapabilities){
-                auto capabilities = maybeCapabilities.get_document().value;
-                isTrashable = capabilities["canTrash"].get_bool();
-                canRename = capabilities["canRename"].get_bool();
-                if(capabilities["canDownload"].get_bool()){
-                        attribute.st_mode |= S_IRUSR | S_IRGRP | S_IROTH;
-                }
-                if(capabilities["canEdit"].get_bool()){
-                        attribute.st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;
-                }
-        }
-
-        trashed = document["trashed"].get_bool().value;
-        m_name = document["name"].get_utf8().value;
-        attribute.st_mtim = getTimeFromRFC3339String(document["modifiedTime"].get_utf8().value);
-        attribute.st_ctim = getTimeFromRFC3339String(document["createdTime"].get_utf8().value);
+        attribute.st_ino = inode;
+        attribute.st_mtim = getTimeFromRFC3339String(modifiedDate);
+        attribute.st_ctim = getTimeFromRFC3339String(createdDate);
         attribute.st_atim = attribute.st_mtim;
         attribute.st_nlink = 1;
-        attribute.st_uid = executing_uid;
-        attribute.st_gid = executing_gid;
-        updateProperties(document);
+        attribute.st_uid = uid == -1 ? executing_uid:uid;
+        attribute.st_gid = gid == -1 ? executing_gid:gid;
+        attribute.st_gid = gid == -1 ? executing_gid:gid;
 
     }
-    GDriveObject _Object::buildRoot(bsoncxx::document::view document){
-        _Object f;
-        f.isUploaded = false;
-
-        f.attribute.st_ino = 1;
-        f.attribute.st_size = 0;
-        struct timespec now{time(nullptr),0};
-        f.attribute.st_atim = now;
-        f.attribute.st_mtim = now;
-        f.attribute.st_ctim = now;
-        f.attribute.st_mode = S_IFDIR | 0755;
-        f.attribute.st_nlink = 1;
-        f.attribute.st_uid = executing_uid;
-        f.attribute.st_gid = executing_gid;
-
-        f.isFolder = true;
-        std::string id(document["id"].get_utf8().value);
-        f.m_id = id;
-        auto sf = std::make_shared<_Object>(f);
-        _Object::idToObject[id] = sf;
-        _Object::inodeToObject[1] = sf;
 
 
-        return sf;
-    }
 
-    GDriveObject _Object::buildTeamDriveHolder(ino_t ino, GDriveObject root){
-        _Object f;
-
-        f.isUploaded = false;
-        f.canRename = false;
-        f.trashed = false;
-
-        f.attribute.st_ino = ino;
-        f.attribute.st_size = 0;
-        f.attribute.st_blocks = 0;
-        struct timespec now{time(nullptr),0};
-        f.attribute.st_atim = now;
-        f.attribute.st_mtim = now;
-        f.attribute.st_ctim = now;
-        f.attribute.st_mode = S_IFDIR | 0555;//S_IRWXU | S_IRWXG | S_IRWXO;
-        f.attribute.st_nlink = 1;
-        f.attribute.st_uid = executing_uid;
-        f.attribute.st_gid = executing_gid;
-
-
-        f.isFolder = true;
-        std::string id("teamDriveHolder");
-        f.m_id = id;
-        f.m_name = "Team Drives";
-        auto sf = std::make_shared<_Object>(f);
-        _Object::idToObject[id] = sf;
-        _Object::inodeToObject[ino] = sf;
-        sf->addParent(root);
-        root->addChild(sf);
-
-        return sf;
-    }
-
-    GDriveObject _Object::buildTeamDrive(ino_t ino, bsoncxx::document::view document, GDriveObject parent){
-        _Object f;
-
-        f.trashed = false;
-
-        f.attribute.st_ino = ino;
-        f.attribute.st_size = 0;
-        struct timespec now{time(nullptr),0};
-        f.attribute.st_atim = now;
-        f.attribute.st_mtim = now;
-        f.attribute.st_ctim = now;
-        f.attribute.st_mode = S_IFDIR | 0755;//S_IRWXU | S_IRWXG | S_IRWXO;
-        f.attribute.st_nlink = 1;
-        f.attribute.st_uid = executing_uid;
-        f.attribute.st_gid = executing_gid;
-        f.m_name = document["name"].get_utf8().value;
-
-        f.isFolder = true;
-        std::string id(document["id"].get_utf8().value);
-        f.m_id = id;
-        auto sf = std::make_shared<_Object>(f);
-        _Object::idToObject[id] = sf;
-        _Object::inodeToObject[ino] = sf;
-
-        sf->addParent(parent);
-        parent->addChild(sf);
-
-        return sf;
-    }
-
-
-    bool _Object::addRelationship(GDriveObject other, std::vector<GDriveObject> &relationship){
-        bool status = false;
-        if( std::find(relationship.begin(), relationship.end(), other) == relationship.end() ){
-            relationship.emplace_back(other);
-            status = true;
-        }
-        return status;
-    }
-
+    /*
     void _Object::updateInode(bsoncxx::document::view document) {
         attribute.st_blksize = 1;
 
@@ -422,49 +288,42 @@ namespace DriveFS{
         if(!gid_found) attribute.st_gid = executing_gid;
 
     }
-
+*/
     _Object::~_Object(){
     }
 
-    void _Object::updatLastAccessToCache(uint64_t chunkNumber){
-        DownloadItem item = m_buffers->at(chunkNumber).lock();
-        if(item) {
-            cache.updateAccessTime((*heap_handles)[chunkNumber], item);
-        }
-    }
-
     void _Object::trash(){
-        if(lookupCount.load(std::memory_order_acquire) == 0){
-            insertEvent.wait();
-            _Object::inodeToObject.erase(attribute.st_ino);
-            _Object::idToObject.erase(m_id);
-            insertEvent.signal();
-        }
-        trashed = true;
-
-        if(!getIsUploaded()){
-            FileIO::deleteFileFromUploadCache(getId());
-        }
+#warning todo move to file manager
+//        if(lookupCount.load(std::memory_order_acquire) == 0){
+//            insertEvent.wait();
+//            inodeToObject.insert(this->attribute.st_ino, nullptr);
+//            idToObject.insert(this->m_id, nullptr);
+//            insertEvent.signal();
+//        }
+//        trashed = true;
+//
+//        if(!getIsUploaded()){
+//            FileIO::deleteFileFromUploadCache(getId());
+//        }
     }
 
     void _Object::trash(GDriveObject file){
         if(!file)
             return;
         file->trash();
-        for(const auto &parent: file->parents){
-            parent->removeChild(file);
-        }
     }
 
-    GDriveObject _Object::findChildByName(const char *name) const {
-        for (auto child: children) {
-            if (child->getName().compare(name) == 0) {
-                return child;
-            }
-        }
-        return nullptr;
-    }
+//    GDriveObject _Object::findChildByName(const char *name) const {
+//#warning bsoncxx
+//        for (auto child: children) {
+//            if (child->getName().compare(name) == 0) {
+//                return child;
+//            }
+//        }
+//        return nullptr;
+//    }
 
+    /*
     bsoncxx::document::value _Object::to_bson(bool includeId) const
     {
 
@@ -500,62 +359,13 @@ namespace DriveFS{
 
         return doc.extract();
     }
+*/
 
-    bsoncxx::document::value _Object::to_rename_bson() const {
-
-        bsoncxx::builder::stream::document doc;
-        doc << "name" << m_name ;
-        doc << "modifiedTime" << getRFC3339StringFromTime(attribute.st_mtim);
-        doc << "appProperties"
-            << open_document
-            << APP_MODE << ((int) attribute.st_mode)
-            << APP_UID  << ((int) attribute.st_uid)
-            << APP_GID  << ((int) attribute.st_gid)
-            << close_document;
-        return doc.extract();
-    }
-
-
-    bool _Object::removeChild(GDriveObject child){
-        m_event.wait();
-        auto found = std::find(children.begin(),children.end(), child);
-        if(found != children.end())
-            children.erase(found);
-        m_event.signal();
-        return found != children.end();
-    }
-
-    bool _Object::removeParent(GDriveObject parent){
-        m_event.wait();
-        auto found = std::find(parents.begin(),parents.end(), parent);
-        if(found != parents.end())
-            parents.erase(found);
-        m_event.signal();
-        return found != parents.end();
-    }
 
     std::string _Object::getCreatedTimeAsString() const{
         return getRFC3339StringFromTime(attribute.st_ctim);
     }
 
-    void _Object::forget(uint64_t nLookup){
-        uint64_t current = lookupCount.fetch_sub(nLookup, std::memory_order_acquire) - nLookup;
-        if ( (current == 0) && (parents.size() == 0))  {
-            ino_t self = attribute.st_ino;
-            _Object::inodeToObject.erase(self);
-            _Object::idToObject.erase(getId());
-        }
 
-    }
-
-    void _Object::setNewId(const std::string &newId) {
-        m_event.wait();
-
-        const auto &shared = _Object::idToObject[m_id];
-        m_id = newId;
-        _Object::idToObject[m_id] = shared;
-
-        m_event.signal();
-    }
 
 }

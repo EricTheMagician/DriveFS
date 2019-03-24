@@ -9,14 +9,16 @@ class DriveFSConan(ConanFile):
     # conan install /DriveFS  --build missing -s compiler.libcxx=libstdc++11
 
     requires = (
-            "boost/1.69.0@conan/stable",  "mongo-cxx-driver/3.3.0@bisect/stable",
+            "boost/1.69.0@conan/stable",
+            "libpqxx/6.3.3@bincrafters/stable",
             "cpprestsdk/2.10.10@bincrafters/stable","OpenSSL/1.0.2r@conan/stable",
             "jemalloc/5.0.1@ess-dmsc/stable"
     )
 
     generators = "cmake"
     default_options = {"OpenSSL:shared": False, "boost:shared": False,
-            "cpprestsdk:shared": False, "jemalloc:shared": False
+            "cpprestsdk:shared": False, "jemalloc:shared": False,
+            "libpqxx:shared": False
     }
     build_policy = "missing"
 

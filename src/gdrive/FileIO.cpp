@@ -13,6 +13,7 @@
 #include <mutex>
 #include <sys/sendfile.h>
 #include <atomic>
+#include "gdrive/FileManager.h"
 
 #define INVALID_CACHE_DELETED 4
 
@@ -172,13 +173,13 @@ namespace DriveFS{
                 LOG(INFO) << "Sleeping for " << sec <<" seconds before retrying";
                 LOG(DEBUG) << "id: " << file->getId();
                 LOG(DEBUG) << "name: " << file->getName();
-                std::stringstream ss;
-                ss << "[ ";
-                for(const auto & parent: file->parents){
-                    ss << "(" << parent->getId() << ", " << parent->getName() << "), ";
-                }
-                ss << "]";
-                LOG(DEBUG) << "parents: " << ss.str();
+//                std::stringstream ss;
+//                ss << "[ ";
+//                for(const auto & parent: file->parents){
+//                    ss << "(" << parent->getId() << ", " << parent->getName() << "), ";
+//                }
+//                ss << "]";
+//                LOG(DEBUG) << "parents: " << ss.str();
                 sleep(sec);
                 FileIO::download(std::move(file), std::move(cache), std::move(cacheName), start, end, backoff+1);
 
@@ -225,7 +226,7 @@ namespace DriveFS{
         cache->event.signal();
 
         //write buffer to disk
-        boost::asio::defer(WritePool,
+        boost::asio::post(WritePool,
                            [cacheName, weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                auto strong_cache = weak_obj.lock();
                                if (strong_cache && !(strong_cache->isInvalid)) {
@@ -307,8 +308,8 @@ namespace DriveFS{
 
         DownloadItem shared = std::make_shared<__no_collision_download__>(std::move(__item__));
         uint64_t chunkNumber = getChunkNumber(chunkStart, block_download_size);
-        (*m_file->m_buffers)[chunkNumber] = shared;
-        Object::cache.insert(m_file, chunkNumber, filesize, shared);
+//        (*m_file->m_buffers)[chunkNumber] = shared;
+        FileManager::DownloadCache.insert(m_file, chunkNumber, filesize, shared);
         return shared;
 
 
@@ -328,7 +329,7 @@ namespace DriveFS{
         DownloadItem item;
 //        LOG(INFO) << "Calling wait " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.wait();
-        m_file->create_heap_handles(block_download_size);
+//        m_file->create_heap_handles(block_download_size);
 //        LOG(INFO) << "Calling signal " << std::to_string( (uintptr_t ) &this->m_file->m_event);
         m_file->m_event.signal();
         std::vector<unsigned char> *buffer = nullptr;
@@ -338,6 +339,8 @@ namespace DriveFS{
         path_to_buffer += "-";
         path_to_buffer += std::to_string(chunkStart);
 
+#warning todo download
+        /*
         if ( (item = m_file->m_buffers->at(chunkNumber).lock()) ) {
 
             if(item->buffer==nullptr || item->buffer->empty()){
@@ -496,7 +499,7 @@ namespace DriveFS{
                                      m_file->getFileSize() - _chunkNumber*block_download_size : block_download_size;
                     cache->size = chunkSize;
                     std::atomic_thread_fence(std::memory_order_release);
-                    Object::cache.insert(m_file, _chunkNumber, chunkSize, cache);
+                    FileManager::DownloadCache.insert(m_file, _chunkNumber, chunkSize, cache);
 //                    void FileIO::download(DownloadItem cache, std::string cacheName2, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
                     (*m_file->m_buffers)[_chunkNumber] = cache;
 
@@ -505,7 +508,7 @@ namespace DriveFS{
                     path /= cacheName2;
 
                     if( (fs::exists(path) && (fs::file_size(path) == block_download_size|| _chunkNumber == getChunkNumber(m_file->getFileSize(), block_download_size))) && (!item) ) {
-                        boost::asio::defer(*ReadPool,
+                        boost::asio::post(*ReadPool,
                                            [io = this, start, chunkSize, path, weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                                auto strong_obj = weak_obj.lock();
 
@@ -536,7 +539,7 @@ namespace DriveFS{
                                                }
                                            });
                     } else {
-                            boost::asio::defer(*DownloadPool,
+                            boost::asio::post(*DownloadPool,
                                [start, chunkSize, path, weak_file = std::weak_ptr<_Object>(m_file), weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                    auto strong_obj = weak_obj.lock();
                                    auto strong_file = weak_file.lock();
@@ -570,6 +573,7 @@ namespace DriveFS{
             if( buffer != nullptr) delete buffer;
             return getFromCloud(size, off);
         }
+         */
 
     }
 
@@ -627,46 +631,49 @@ namespace DriveFS{
     }
 
     void FileIO::clearFileFromCache(){
-        auto buffers = m_file->m_buffers;
-        if(buffers != nullptr) {
-            for (auto weak: *buffers) {
-                weak.reset();
-            }
-        }
+#warning todo
+//        auto buffers = m_file->m_buffers;
+//        if(buffers != nullptr) {
+//            for (auto weak: *buffers) {
+//                weak.reset();
+//            }
+//        }
     }
 
     void FileIO::upload(bool runAsynchronously){
         if(runAsynchronously) {
-            boost::asio::defer(*UploadPool,
-                               [io = this]() -> void {
+            boost::asio::post(
+                    *UploadPool,
+                   [io = this]() -> void {
 
-                                   if (io->checkFileExists()) {
-                                       sleep(3);
-                                       // file can have no parents happen when launching DriveFS
-                                       // so wait until it is filled. if it's deleted
-                                       auto file = io->m_file;
-                                       while(io->m_file->parents.empty() && !io->m_file->getIsTrashed() && !io->m_file->getIsUploaded()){
-                                           if(file->getIsTrashed()){
-                                               LOG(INFO) << "fiile with id " << file->getId() << "is trashed";
-                                               return;
-                                           }
-                                           LOG(INFO) << "while uploading: waiting for " << file->getId() << "to have parents";
-                                           sleep(1);
-                                       }
-                                       
-
-                                       if(file->getIsTrashed()){
-                                           io->checkFileExists();
-                                       }else if(!file->getIsUploaded()) {
-                                           io->_upload();
-                                       }else{
-                                           io->move_files_to_download_after_finish_uploading();
-                                       }
-                                   }
+                       if (io->checkFileExists()) {
+                           sleep(3);
+                           // file can have no parents happen when launching DriveFS
+                           // so wait until it is filled. if it's deleted
+                           auto file = io->m_file;
+#warning bsoncxx
+//                           while(io->m_file->parents.empty() && !io->m_file->getIsTrashed() && !io->m_file->getIsUploaded()){
+//                               if(file->getIsTrashed()){
+//                                   LOG(INFO) << "fiile with id " << file->getId() << "is trashed";
+//                                   return;
+//                               }
+//                               LOG(INFO) << "while uploading: waiting for " << file->getId() << "to have parents";
+//                               sleep(1);
+//                           }
 
 
-                                   delete io;
-                               });
+                           if(file->getIsTrashed()){
+                               io->checkFileExists();
+                           }else if(!file->getIsUploaded()) {
+                               io->_upload();
+                           }else{
+                               io->move_files_to_download_after_finish_uploading();
+                           }
+                       }
+
+
+                       delete io;
+                   });
         }else{
             _upload();
         }
@@ -678,14 +685,15 @@ namespace DriveFS{
         if(m_file->getIsTrashed()){
             return false;
         }
-        const auto cursor = DriveFS::_Object::inodeToObject.find(m_file->getInode());
+        const auto cursor = FileManager::inodeToObject.get(m_file->getInode());
 
-        const bool temp = cursor == DriveFS::_Object::inodeToObject.cend();
+//        const bool temp =
+//
+//        LOG_IF(temp, DEBUG) << "Cached file no longer exists with name " << m_file->getName() << " and id " << m_file->getId();
 
-
-        LOG_IF(temp, DEBUG) << "Cached file no longer exists with name " << m_file->getName() << " and id " << m_file->getId();
-
-        return !temp;
+//        return !temp;
+        assert(false);
+        return false;
 
     }
     void FileIO::_upload(){
@@ -872,19 +880,8 @@ namespace DriveFS{
     }
     void FileIO::resumeFileUploadFromUrl(std::string url, bool runAsynchronously){
         if(runAsynchronously){
-            boost::asio::defer(*UploadPool,
+            boost::asio::post(*UploadPool,
             [io = this, url]()->void{
-
-                // file can have no parents happen when launching DriveFS
-                // so wait until it is filled
-                auto file = io->m_file.get();
-                while(file->parents.empty() ){
-                    if(file->getIsTrashed()){
-                        return;
-                    }
-                    sleep(1);
-                    LOG(INFO) << "while getting resumeable upload url, parents were empty for file with id " << file->getId() <<" -- sleeping";
-                };
 
                 while(!io->resumeFileUploadFromUrl(url));
                 delete io;
@@ -940,6 +937,8 @@ namespace DriveFS{
 
     void FileIO::checkCacheSize() {
 
+#warning checkCacheSize
+        /*
         mongocxx::pool::entry conn = m_account->pool.acquire();
         mongocxx::database client = conn->database(std::string(DATABASENAME));
         mongocxx::collection db = client[std::string(DBCACHENAME)];
@@ -1009,6 +1008,7 @@ namespace DriveFS{
         }
         if(needsUpdating && count > 0)
             db.bulk_write(documents);
+            */
     }
 
     void setMaxConcurrentDownload(int n){
@@ -1029,7 +1029,7 @@ namespace DriveFS{
     }
 
     void FileIO::deleteFilesFromCacheOnDisk(){
-
+#warning deleteFilesFromCacheOnDisk
         int64_t oldSize = FileIO::cacheSize.load(std::memory_order_relaxed);
         int64_t workingSize = oldSize,
         targetSize = ((double)FileIO::maxCacheOnDisk) * 0.9;
@@ -1037,7 +1037,7 @@ namespace DriveFS{
         LOG(INFO) << "Deleting files until target size is reached";
         LOG(DEBUG) << "Target Size: " << targetSize;
         LOG(DEBUG) << "Current Size: "  << oldSize;
-
+/*
         mongocxx::pool::entry conn = m_account->pool.acquire();
         mongocxx::database client = conn->database(std::string(DATABASENAME));
         mongocxx::collection db = client[std::string(DBCACHENAME)];
@@ -1089,8 +1089,7 @@ namespace DriveFS{
         if(newSize > FileIO::maxCacheOnDisk){
             deleteFilesFromCacheOnDisk();
         }
-
-
+        */
 
     }
 
@@ -1143,6 +1142,8 @@ namespace DriveFS{
     }
 
     void FileIO::insertFileToCacheDatabase(fs::path path, size_t size){
+#warning insertFileToCacheDatabase
+        /*
         mongocxx::pool::entry conn = m_account->pool.acquire();
         mongocxx::database client = conn->database(std::string(DATABASENAME));
         mongocxx::collection db = client[std::string(DBCACHENAME)];
@@ -1166,9 +1167,11 @@ namespace DriveFS{
         }
 
         incrementCacheSize(size);
-
+*/
     }
     void FileIO::insertFilesToCacheDatabase(const std::vector<fs::path> &paths, const std::vector<size_t> &sizes){
+#warning insertFilesToCacheDatabase
+        /*
         mongocxx::pool::entry conn = m_account->pool.acquire();
         mongocxx::database client = conn->database(std::string(DATABASENAME));
         mongocxx::collection db = client[std::string(DBCACHENAME)];
@@ -1206,6 +1209,7 @@ namespace DriveFS{
 
         LOG(INFO) << "Current size of cache is "
                   << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
+      */
 
     }
 

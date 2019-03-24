@@ -9,28 +9,14 @@
 #include "gdrive/File.h"
 #include <boost/circular_buffer.hpp>
 #include <boost/filesystem.hpp>
-#include <bsoncxx/builder/basic/array.hpp>
-#include <bsoncxx/builder/basic/document.hpp>
-#include <bsoncxx/builder/basic/kvp.hpp>
-#include <bsoncxx/builder/stream/array.hpp>
-#include <bsoncxx/builder/stream/document.hpp>
-#include <bsoncxx/document/value.hpp>
-#include <bsoncxx/document/view.hpp>
-#include <bsoncxx/json.hpp>
 #include <cpprest/http_client.h>
 #include <string_view>
 #include <optional>
+#include <cpprest/json.h>
+#include <pqxx/result>
 
 using namespace web::http::client; // HTTP client features
 using namespace web::http::oauth2::experimental;
-using bsoncxx::builder::concatenate;
-using bsoncxx::builder::basic::kvp;
-using bsoncxx::builder::stream::close_array;
-using bsoncxx::builder::stream::close_document;
-using bsoncxx::builder::stream::document;
-using bsoncxx::builder::stream::finalize;
-using bsoncxx::builder::stream::open_array;
-using bsoncxx::builder::stream::open_document;
 #define GDRIVE_OAUTH_SCOPE "https://www.googleapis.com/auth/drive"
 
 namespace DriveFS
@@ -44,7 +30,7 @@ public:
           const std::string &refresh_token);
 
   Account(Account &&acount);
-  static Account getAccount(std::string uri);
+  static Account getAccount(const std::string & uri);
 
   inline void refresh_token(int backoff = 0)
   {
@@ -54,7 +40,7 @@ public:
 
   virtual GDriveObject createNewChild(GDriveObject parent, const char *name,
                                       int mode, bool isFile);
-  bool removeChildFromParent(GDriveObject child, GDriveObject parent);
+  bool removeChildFromParent(GDriveObject const &child, GDriveObject const &parent);
   virtual void upsertFileToDatabase(GDriveObject file);
   virtual std::string
   getUploadUrlForFile(GDriveObject file,
@@ -70,17 +56,19 @@ public:
                                       std::string removeParents = "",
                                       int backoff = 0);
   std::string getNextId();
+  inline const std::string & getDBUri() const {return  m_dbUri;}
   void removeFileWithIDFromDB(std::string id);
+
 
 protected:
   void run_internal() override;
   virtual void loadFilesAndFolders() override;
-  [[nodiscard]] virtual std::string getFilesAndFolders(std::string_view nextPageToken = "",
+  [[nodiscard]] virtual std::string getFilesAndFolders(std::string nextPageToken = "",
                                   int backoff = 0,
-                                  std::string_view teamDriveId="");
+                                  std::string teamDriveId="");
 
 private:
-  void parseFilesAndFolders(bsoncxx::document::view value);
+  void parseFilesAndFolders(web::json::value value);
   void getTeamDrives(int backoff = 0);
   void linkParentsAndChildren();
   std::string getUploadUrlForFile(http_request, int backoff = 1);
@@ -88,15 +76,13 @@ private:
   std::string createFolderOnGDrive(const std::string json, int backoff = 0);
   bool trash(GDriveObject file, int backoff = 0);
   virtual void background_update(std::string teamDriveId);
-  bsoncxx::document::value getRootFolder();
-  void invalidateParentEntry(const GDriveObject &obj)
-  {
-    for (auto parent : obj->parents)
-    {
-      this->invalidateEntry(parent->attribute.st_ino, obj->getName());
-    }
-  };
-
+  std::string getRootFolderId();
+  void setMaximumInodeFromDatabase();
+  std::string m_rootFolderId;
+  void invalidateParentEntries(const GDriveObject &obj);
+  void invalidateParentEntries(std::string const &id);
+  void invalidateParentEntries(const pqxx::result &result);
+  void invalidateId(std::string const &id);
   boost::circular_buffer<std::string> m_id_buffer;
 
   std::map<std::string, std::string>
@@ -105,8 +91,9 @@ private:
 
 }; // namespace DriveFS
 
-constexpr std::string_view DATABASEDATA = "GDriveData";
-constexpr std::string_view DATABASESETTINGS = "settings";
-constexpr std::string_view DATABASENAME = "DriveFS";
-constexpr std::string_view GDRIVETOKENNAME = "gdrive_tokens";
-constexpr std::string_view GDRIVELASTCHANGETOKEN = "gdrive last change token";
+static const std::string DATABASEDATA = "gdrivedata";
+static const std::string DATABASESETTINGS = "drive_settings";
+static const std::string DATABASENAME = "DriveFS";
+static const std::string GDRIVEACCESSTOKENNAME = "access token";
+static const std::string GDRIVEREFRESHTOKENNAME = "refresh_tokens";
+static const std::string GDRIVELASTCHANGETOKEN = "last change token";

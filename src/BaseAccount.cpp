@@ -123,7 +123,7 @@ BaseAccount::BaseAccount(std::string dbUri, std::string api, std::string id,
       m_listener(nullptr),
       m_needToInitialize(true), m_event(1), m_key(id),
       m_token_expires_at(std::chrono::system_clock::now()),
-      pool(mongocxx::uri(dbUri)), refresh_interval(300),
+      refresh_interval(300),
       inode_count(1){};
 //BaseAccount(dbUri, "https://www.googleapis.com/drive/v3/",
 //                  "126857315828-tj5cie9scsk0b5edmakl266p7pis80ts.apps."

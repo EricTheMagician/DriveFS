@@ -27,9 +27,13 @@ set(common_src_files
         src/BaseFileSystem.cpp
         ./include/BaseFileSystem.h
         src/FolderIO.cpp
-        ./include/FolderIO.h 
-        
-)
+        ./include/FolderIO.h
+
+        include/Database.h
+        src/Database.cpp
+        src/gdrive/FileManager.cpp
+        include/gdrive/FileManager.h
+        )
 
 # add_executable(${PROJECT_NAME}_encrypted
 #         ${common_src_files}
@@ -65,23 +69,22 @@ set(common_src_files
 
 add_executable(${PROJECT_NAME}
         ${common_src_files}
-        # my files
-        src/main.cpp
         src/gdrive/File.cpp
         ./include/gdrive/File.h
         src/gdrive/Filesystem.cpp
         ./include/gdrive/Filesystem.h
+        src/main.cpp
         src/gdrive/Account.cpp
         ./include/gdrive/Account.h
         src/BaseAccount.cpp
         ./include/BaseAccount.h
-        external/adaptive_time_parser/adaptive_time_parser.cpp
-        src/gdrive/Filesystem.cpp
-        ./include/gdrive/Filesystem.h
+#        external/adaptive_time_parser/adaptive_time_parser.cpp
+#        src/gdrive/Filesystem.cpp
+#        ./include/gdrive/Filesystem.h
         src/gdrive/FileIO.cpp
         ./include/gdrive/FileIO.h
-        ./include/DownloadBuffer.h
-        ./src/DownloadBuffer.cpp 
+#        ./include/DownloadBuffer.h
+#        ./src/DownloadBuffer.cpp
 
 
         )
@@ -145,7 +148,7 @@ target_link_libraries(${PROJECT_NAME}
         CONAN_PKG::boost
         CONAN_PKG::OpenSSL
         CONAN_PKG::cpprestsdk
-        CONAN_PKG::mongo-cxx-driver
+        CONAN_PKG::libpqxx
 
 )
 

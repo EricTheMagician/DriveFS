@@ -6,6 +6,8 @@
 #include <boost/program_options.hpp>
 #include "gdrive/FileIO.h"
 #include "gdrive/File.h"
+#include "Database.h"
+#include "gdrive/FileManager.h"
 
 #include <sstream>
 #if FUSE_USE_VERSION < 30
@@ -26,7 +28,7 @@ int main(int argc, char **argv) {
             ("help,h", "t his help message")
             ("config-file,c", po::value<std::string>(), "path to a config file. arguments should be one per line")
             ("mount", po::value<std::string>(), "set the mount point. useful for config files")
-            ("database", po::value<std::string>()->default_value("mongodb://localhost/"), "set the database path")
+            ("database", po::value<std::string>()->default_value("postgres://postgres@localhost/"), "set the database path. Must end with a slash")
             ("cache-location", po::value<std::string>()->default_value("/tmp/DriveFS"))
             ("cache-chunk-size", po::value<size_t>()->default_value(8 * 1024 * 1024),
              "size of segments to download, in bytes, default: 8MB")
@@ -139,8 +141,8 @@ int main(int argc, char **argv) {
     DriveFS::FileIO::block_read_ahead_end = 1024 * 1024 + 184 * 1024;
     DriveFS::FileIO::move_files_to_download_on_finish_upload = vm["move-to-download"].as<bool>();
 
-    DriveFS::_Object::cache.m_block_download_size = DriveFS::FileIO::block_download_size;
-    DriveFS::_Object::cache.maxCacheSize = vm["cache-size"].as<size_t>() * 1024 * 1024;
+    DriveFS::FileManager::DownloadCache.m_block_download_size = DriveFS::FileIO::block_download_size;
+    DriveFS::FileManager::DownloadCache.maxCacheSize = vm["cache-size"].as<size_t>() * 1024 * 1024;
 
     if (vm.count("max-concurrent-downloads")) {
         DriveFS::setMaxConcurrentDownload(vm["max-concurrent-downloads"].as<int>());
@@ -161,7 +163,9 @@ int main(int argc, char **argv) {
      ***********************/
     File::executing_uid = geteuid();
     File::executing_gid = getegid();
-
+    std::string uri = vm["database"].as<std::string>();
+    uri += DATABASENAME;
+    db_handle_t::setDatabase(uri);
     DriveFS::Account account = DriveFS::Account::getAccount(
             vm["database"].as<std::string>());
     account.setRefreshInterval(vm["refresh-interval"].as<int>());

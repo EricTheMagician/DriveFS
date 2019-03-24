@@ -2,7 +2,7 @@
 // Created by eric on 29/01/18.
 //
 
-#include <gdrive/FileIO.h>
+#include "gdrive/FileIO.h"
 #include "gdrive/Filesystem.h"
 #include "gdrive/Account.h"
 #include "gdrive/File.h"
@@ -10,7 +10,7 @@
 #include <easylogging++.h>
 #include <algorithm>
 #include <linux/fs.h>
-
+#include "gdrive/FileManager.h"
 
 
 namespace DriveFS{
@@ -31,23 +31,9 @@ namespace DriveFS{
         return static_cast<Account *>(fuse_req_userdata(req));
     }
 
-    GDriveObject getObjectFromInodeAndReq(fuse_req_t req, ino_t inode){
-
-        const auto &inodeToObject = DriveFS::_Object::inodeToObject;
-        const auto cursor = inodeToObject.find(inode);
-
-        if(cursor == inodeToObject.cend()){
-            //object not found
-            return nullptr;
-        }
-
-        return cursor->second;
-
-    }
-
     void lookup(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
 //        SFAsync([=] {
-            GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
+            GDriveObject parent = FileManager::fromInode(parent_ino);
             if(!parent){
                 int reply_err = fuse_reply_err(req, ENOENT);
                 while(reply_err != 0){
@@ -55,23 +41,20 @@ namespace DriveFS{
                 }
                 return;
             }
-            _lockObject test = parent.get();
-            for (auto child: parent->children) {
-                if (child->getName() == name && !(child->getIsTrashed())) {
-                    struct fuse_entry_param e;
-                    memset(&e, 0, sizeof(e));
-                    e.attr = child->attribute;
-                    e.ino = e.attr.st_ino;
-                    e.attr_timeout = 18000.0;
-                    e.entry_timeout = 18000.0;
-                    e.generation = 1;
-                    child->lookupCount.fetch_add(1, std::memory_order_relaxed);
-                    int reply_err = fuse_reply_entry(req, &e);
-                    while(reply_err != 0){
-                        reply_err = fuse_reply_entry(req, &e);
-                    }
-                    return;
+            GDriveObject child =FileManager::fromParentIdAndName(parent->getId(), name);
+            if(child){
+                struct fuse_entry_param e;
+                memset(&e, 0, sizeof(e));
+                e.attr = child->attribute;
+                e.ino = e.attr.st_ino;
+                e.attr_timeout = 18000.0;
+                e.entry_timeout = 18000.0;
+                e.generation = 1;
+                int reply_err = fuse_reply_entry(req, &e);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_entry(req, &e);
                 }
+                return;
             }
             int reply_err = fuse_reply_err(req, ENOENT);
             while(reply_err != 0){
@@ -81,16 +64,16 @@ namespace DriveFS{
     }
 
     void forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup){
-        auto object = getObjectFromInodeAndReq(req, ino);
-        if (object) {
-            object->forget(nlookup);
-        }
+//        auto object = FileManager::fromInode(ino);
+//        if (object) {
+//            object->forget(nlookup);
+//        }
 
         fuse_reply_none(req);
     }
 
     void getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-            GDriveObject object(getObjectFromInodeAndReq(req, ino));
+            GDriveObject object(FileManager::fromInode(ino));
             if (object) {
                 int reply_err = fuse_reply_attr(req, &(object->attribute), 30.0);
                 while(reply_err != 0){
@@ -105,7 +88,7 @@ namespace DriveFS{
     }
 
     void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi){
-        auto file = getObjectFromInodeAndReq(req, ino);
+        auto file = FileManager::fromInode(ino);
         if(!file) {
             int reply_err = fuse_reply_err(req, ENOENT);
             while (reply_err != 0) {
@@ -152,7 +135,9 @@ namespace DriveFS{
         file->m_event.signal();
         if(file->getIsUploaded()){
             auto account = getAccount(req);
-            const bool status = account->updateObjectProperties(file->getId(), bsoncxx::to_json(file->to_rename_bson()));
+#warning setattr
+//            const bool status = account->updateObjectProperties(file->getId(), bsoncxx::to_json(file->to_rename_bson()));
+            const bool status = false;
             if(!status){
                 int reply_err = fuse_reply_err(req, EIO);
                 while(reply_err != 0){
@@ -174,9 +159,9 @@ namespace DriveFS{
     void mknod(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev_t rdev);
 
     void mkdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name, mode_t mode){
-        auto parent = getObjectFromInodeAndReq(req, parent_ino);
+        auto parent = FileManager::fromInode(parent_ino);
         _lockObject test = parent.get();
-        GDriveObject child = parent->findChildByName(name);
+        GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
         if (child) {
             LOG(INFO) << "Mkdir with name " << name << " already existed";
             int reply_err = fuse_reply_err(req, EEXIST);
@@ -203,16 +188,15 @@ namespace DriveFS{
     }
 
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
+#warning bsoncxx
+        /*
         auto *account = getAccount(req);
-        GDriveObject parent(getObjectFromInodeAndReq(req, parent_ino));
+        GDriveObject parent(FileManager::fromInode(parent_ino));
         parent->m_event.wait();
         bool signaled = false;
-        auto children = &(parent->children);
+        GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
 
-        for (uint_fast32_t i = 0; i < children->size(); i++) {
-            auto child = (*children)[i];
-            if (child->getName().compare(name) == 0) {
-                children->erase(children->begin() + i);
+        if(child){
                 child->trash();
                 parent->m_event.signal();
                 signaled = true;
@@ -240,8 +224,6 @@ namespace DriveFS{
 #endif
 
 
-                break;
-            }
         }
 
         if (!signaled) {
@@ -255,43 +237,47 @@ namespace DriveFS{
                 reply_err = fuse_reply_err(req, 0);
             }
         }
-
+        */
     }
 
     void rmdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
-//        SFAsync([=] {
-            auto parent = getObjectFromInodeAndReq(req, parent_ino);
-            GDriveObject child = parent->findChildByName(name);
-            if (child) {
-                _lockObject lock { child.get() };
-                if (!child->children.empty()) {
-                    int reply_err = fuse_reply_err(req, ENOTEMPTY);
-                    while(reply_err != 0){
-                        reply_err = fuse_reply_err(req, ENOTEMPTY);
-                    }
-                } else {
-                    auto account = getAccount(req);
-                    if (account->removeChildFromParent(child, parent)) {
-                        int reply_err = fuse_reply_err(req, 0);
-                        while(reply_err != 0){
-                            reply_err = fuse_reply_err(req, 0);
-                        }
-                    } else {
-                        int reply_err = fuse_reply_err(req, EIO);
-                        while(reply_err != 0){
-                            reply_err = fuse_reply_err(req, EIO);
-                        }
-                    }
-                }
-
-
-            } else {
-                int reply_err = fuse_reply_err(req, ENOENT);
+        auto parent = FileManager::fromInode(parent_ino);
+        if(!parent->getIsFolder()){
+            fuse_reply_err(req, ENOENT);
+            return;
+        }
+        GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
+        if (child) {
+            _lockObject lock { child.get() };
+            if (!(FileManager::getChildren(child->getId()).empty())) {
+                int reply_err = fuse_reply_err(req, ENOTEMPTY);
                 while(reply_err != 0){
-                    reply_err = fuse_reply_err(req, ENOENT);
+                    reply_err = fuse_reply_err(req, ENOTEMPTY);
+                }
+                return;
+            }
+
+            auto account = getAccount(req);
+            if (account->removeChildFromParent(child, parent)) {
+                int reply_err = fuse_reply_err(req, 0);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, 0);
+                }
+            } else {
+                int reply_err = fuse_reply_err(req, EIO);
+                while(reply_err != 0){
+                    reply_err = fuse_reply_err(req, EIO);
                 }
             }
-//        });
+
+
+
+        } else {
+            int reply_err = fuse_reply_err(req, ENOENT);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, ENOENT);
+            }
+        }
     }
 
     void symlink(fuse_req_t req, const char *link, fuse_ino_t parent, const char *name);
@@ -301,8 +287,8 @@ namespace DriveFS{
             , unsigned int flags
 #endif
     ){
-        auto parent = getObjectFromInodeAndReq(req, parent_ino);
-        auto child = parent->findChildByName(name);
+        auto parent = FileManager::fromInode(parent_ino);
+        auto child = FileManager::fromParentIdAndName(parent->getId(), name);
 
         bool newParents = parent_ino != newparent_ino;
         GDriveObject newParent;
@@ -317,8 +303,8 @@ namespace DriveFS{
         }
 #endif
         if(newParents){
-            newParent = getObjectFromInodeAndReq(req, newparent_ino);
-            auto oldChild = newParent->findChildByName(name);
+            newParent = FileManager::fromInode(newparent_ino);
+            auto oldChild = FileManager::fromParentIdAndName(newParent->getId(), name);
             if(oldChild){
 #if defined(USE_FUSE3) && defined(RENAME_NOREPLACE)
                 if(RENAME_NOREPLACE & flags){
@@ -337,15 +323,6 @@ namespace DriveFS{
 #endif
             }
             LOG(INFO) << "Renaming: Mving file ("<< name<<") from " << parent->getName() << " to " << newParent->getName();
-            {
-                _lockObject lock { parent.get() };
-                parent->removeChild(child);
-            }
-
-            {
-                _lockObject lock { newParent.get() };
-                newParent->addChild(child);
-            }
         }
 
         if(child->getName() != newname) {
@@ -356,17 +333,17 @@ namespace DriveFS{
         account->upsertFileToDatabase(child);
 
         if(child->getIsUploaded()){
-            auto account = getAccount(req);
 
             bool status = false;
             if(newParents) {
                 status = account->updateObjectProperties(child->getId(),
-                                                         bsoncxx::to_json(child->to_rename_bson()),
-                                                         newParent->getId(), parent->getId()
-                );
+                                                         FileManager::asJSONForRename(child),
+                                                         newParent->getId(), parent->getId());
             } else {
-                status = account->updateObjectProperties(child->getId(),
-                                                                    bsoncxx::to_json(child->to_rename_bson()));
+                status = account->updateObjectProperties(
+                        child->getId(),
+                        FileManager::asJSONForRename(child)
+                        );
             }
             if(!status){
                 int reply_err = fuse_reply_err(req, EIO);
@@ -405,7 +382,7 @@ namespace DriveFS{
 
     void open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
         try{
-            GDriveObject object = getObjectFromInodeAndReq(req, ino);
+            GDriveObject object = FileManager::fromInode(ino);
             if(!object || object->getIsTrashed()){
                 int reply_err = fuse_reply_err(req, ENOENT);
                 while(reply_err != 0){
@@ -439,6 +416,8 @@ namespace DriveFS{
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
+#warning bsoncxx
+/*
         try {
             FileIO *io = (FileIO *) fi->fh;
             if (io == nullptr) {
@@ -495,10 +474,11 @@ namespace DriveFS{
                 reply_err = fuse_reply_err(req, errno);
             }
         }
+        */
     }
 
     void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi){
-        GDriveObject object = getObjectFromInodeAndReq(req, ino);
+        GDriveObject object = FileManager::fromInode(ino);
         if(object == nullptr){
             int reply_err = fuse_reply_err(req, ENOENT);
             while(reply_err != 0){
@@ -640,7 +620,7 @@ namespace DriveFS{
             if(io->b_needs_uploading){
                 //sleep for 3 seconds to make sure that the filesystem has not decided to delete the file.
                 fi->fh = 0;
-                auto file = getObjectFromInodeAndReq(req, ino);
+                auto file = FileManager::fromInode(ino);
                 if(file) {
                     io->upload(true);
                 }
@@ -655,7 +635,7 @@ namespace DriveFS{
     void fsync(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
 
     void opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        GDriveObject object = getObjectFromInodeAndReq(req, ino);
+        GDriveObject object = FileManager::fromInode(ino);
         if(! object->getIsFolder()){
             int reply_err = fuse_reply_err(req, ENOTDIR);
             while(reply_err != 0){
@@ -664,9 +644,10 @@ namespace DriveFS{
             return;
         }
         _lockObject test { object.get() };
+        std::vector<GDriveObject> children = FileManager::getChildren(object->getId());
 
-        FolderIO *io = new FolderIO(req, object->children.size());
-        for (auto child: object->children) {
+        FolderIO *io = new FolderIO(req, children.size());
+        for (auto const &child: children) {
             if(child->getIsTrashed())
                 continue;
             io->addDirEntry(child->getName().c_str(), child->attribute);
@@ -732,7 +713,7 @@ namespace DriveFS{
     }
 
     void getxattr(fuse_req_t req, fuse_ino_t ino, const char *name, size_t size){
-        auto object = getObjectFromInodeAndReq(req, ino);
+        auto object = FileManager::fromInode(ino);
         if(object){
             std::string value;
             if(strcmp(name, "id") == 0){
@@ -781,7 +762,7 @@ namespace DriveFS{
     }
 
     void listxattr(fuse_req_t req, fuse_ino_t ino, size_t size){
-        auto object = getObjectFromInodeAndReq(req, ino);
+        auto object = FileManager::fromInode(ino);
         if(object){
 
             if(object->getIsFolder()){
@@ -858,7 +839,7 @@ namespace DriveFS{
 
     void create(fuse_req_t req, fuse_ino_t parent_ino, const char *name, mode_t mode, struct fuse_file_info *fi){
         Account *account = getAccount(req);
-        GDriveObject parent = getObjectFromInodeAndReq(req, parent_ino);
+        GDriveObject parent = FileManager::fromInode(parent_ino);
         if (parent) {
             if (!parent->getIsFolder()) {
                 int reply_err = fuse_reply_err(req, ENOTDIR);
@@ -884,21 +865,20 @@ namespace DriveFS{
             return;
         }
         _lockObject test { parent.get() };
-        for (auto child: parent->children) {
-            if (child->getName().compare(name) == 0) {
-                LOG(INFO) << "When creating file with name " << name << " parentId " << parent->getId() << " already existed";
-                int reply_err = fuse_reply_err(req, EEXIST);
-                while(reply_err != 0){
-                    reply_err = fuse_reply_err(req, EEXIST);
-                }
-                return;
+        GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
+        if (child) {
+            LOG(INFO) << "When creating file with name " << name << " parentId " << parent->getId() << " already existed";
+            int reply_err = fuse_reply_err(req, EEXIST);
+            while(reply_err != 0){
+                reply_err = fuse_reply_err(req, EEXIST);
             }
+            return;
         }
 
 
         LOG(INFO) << "Creating file with name " << name << " and parent Id " << parent->getId();
 
-        GDriveObject child = account->createNewChild(parent, name, mode, true);
+        child = account->createNewChild(parent, name, mode, true);
         FileIO *io = new FileIO(child, fi->flags);
         fi->fh = (uintptr_t) io;
         struct fuse_entry_param e;
@@ -976,11 +956,11 @@ namespace DriveFS{
 
         for(int i = 0; i < count; i++){
             uint64_t ino = forgets[i].ino;
-            auto object = getObjectFromInodeAndReq(req, ino);
-            if(object) {
-
-                object->forget(forgets[i].nlookup);
-            }
+            auto object = FileManager::fromInode(ino);
+//            if(object) {
+//
+//                object->forget(forgets[i].nlookup);
+//            }
         }
 
         fuse_reply_none(req);

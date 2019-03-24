@@ -110,6 +110,8 @@ public:
     m_block_download_size(block_download_size){
     }
     void insert(file_t file, uint64_t chunkNumber, size_t size, DownloadItem item){
+#warning todo
+        /*
         sema.wait();
         auto handle = cache->push(item);
         file->create_heap_handles(m_block_download_size);
@@ -136,6 +138,8 @@ public:
         }
         VLOG(9) << "Inserting " << std::to_string(chunkNumber);
         sema.signal();
+                  */
+
     }
 
     void updateAccessTime(file_t file, uint64_t chunkNumber, DownloadItem item){

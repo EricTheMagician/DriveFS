@@ -34,7 +34,11 @@
 # clion and jetbrains folders
 .idea
 build
+cmake-build-default/
 cmake-build-debug/
+cmake-build-release/
+.vscode/
+.kdev4/
 compile_commands.json
 external/include
 external/lib

@@ -7,8 +7,6 @@
 #include <autoresetevent.h>
 #include <cpprest/http_client.h>
 #include <cpprest/http_listener.h>
-#include <mongocxx/client.hpp>
-#include <mongocxx/pool.hpp>
 
 #if FUSE_USE_VERSION >= 30
 #include <fuse3/fuse_lowlevel.h>
@@ -121,6 +119,4 @@ protected:
   int refresh_interval;
   bool m_needToInitialize;
 
-public:
-  mongocxx::pool pool;
 };
