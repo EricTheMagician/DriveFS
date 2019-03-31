@@ -8,10 +8,8 @@
 #include "gdrive/File.h"
 #include "Database.h"
 #include "gdrive/FileManager.h"
-
+#include "gdrive/Dedupe.h"
 #include <sstream>
-#if FUSE_USE_VERSION < 30
-#endif
 
 namespace po = boost::program_options;
 
@@ -19,7 +17,7 @@ INITIALIZE_EASYLOGGINGPP;
 
 int main(int argc, char **argv) {
 
-    po::options_description desc("General options"), log_desc("Log Options"), fuse_desc("Fuse Optionns");
+    po::options_description desc("General options"), duplcate_desc("Duplicate Options"), log_desc("Log Options"), fuse_desc("Fuse Optionns");
     std::string max_download = std::string("max number of concurrent downloads, defaults to ") +
                                std::to_string(std::thread::hardware_concurrency());
     std::string max_upload = std::string("max number of concurrent uploads, defaults to ") +
@@ -44,6 +42,11 @@ int main(int argc, char **argv) {
             ("max-concurrent-uploads", po::value<int>(), max_upload.c_str())
             ("refresh-interval", po::value<int>()->default_value(300), "refresh interval in seconds");
 
+    duplcate_desc.add_options()
+            ("findDuplicates", "get a list of duplciates and exit")
+            ("findParents", "get a list of parents and exit")
+            ;
+
     fuse_desc.add_options()
             ("fuse-foreground,f", "run the fuse application in foreground instead of a daemon")
             ("fuse-debug,d", "run the fuse application in debug mode")
@@ -64,18 +67,13 @@ int main(int argc, char **argv) {
 
     po::variables_map vm;
     po::options_description all_desc("Allowed Options");
-    all_desc.add(desc).add(fuse_desc).add(log_desc);
+    all_desc.add(desc).add(fuse_desc).add(duplcate_desc).add(log_desc);
 
     po::store(po::command_line_parser(argc, argv).
             options(all_desc).positional(p).run(), vm);
 
-    if (vm.count("config-file")) {
-        std::ifstream ifs{vm["config-file"].as<std::string>().c_str()};
-        if (ifs)
-            store(po::parse_config_file(ifs, all_desc), vm);
-    }
-
     po::notify(vm);
+
 
     /***************
      *
@@ -83,13 +81,56 @@ int main(int argc, char **argv) {
      *
      **************/
 
-    if (vm.count("help") || vm.count("mount") == 0) {
+    if (vm.count("help") ) {
         std::cout << "Usage:\n";
         std::cout << argv[0] << " mountpoint [options]"
                   << "\n\n";
         std::cout << all_desc << "\n";
         return 0;
     }
+
+    /******************
+     *
+     * Find Duplicates
+     *
+     ******************/
+    std::string uri = vm["database"].as<std::string>();
+    uri += DATABASENAME;
+    db_handle_t::setDatabase(uri);
+
+    if(vm.count("findDuplicates")){
+        DriveFS::getDupicates();
+        std::exit(0);
+    }
+
+    if(vm.count("findParents")){
+        DriveFS::getParents();
+        std::exit(0);
+    }
+
+    /***************
+     *
+     * Configuration
+     *
+     **************/
+
+    if (vm.count("config-file")) {
+        std::ifstream ifs{vm["config-file"].as<std::string>().c_str()};
+        if (ifs)
+            store(po::parse_config_file(ifs, all_desc), vm);
+    }
+
+
+    if ( vm.count("mount") == 0) {
+        std::cout << "Mountpoint missing.\n";
+        std::cout << "Usage:\n";
+        std::cout << argv[0] << " mountpoint [options]"
+                  << "\n\n";
+        std::cout << all_desc << "\n";
+        return 0;
+    }
+
+
 
     /******************
      *
@@ -142,7 +183,7 @@ int main(int argc, char **argv) {
     DriveFS::FileIO::move_files_to_download_on_finish_upload = vm["move-to-download"].as<bool>();
 
     DriveFS::FileManager::DownloadCache.m_block_download_size = DriveFS::FileIO::block_download_size;
-    DriveFS::FileManager::DownloadCache.maxCacheSize = vm["cache-size"].as<size_t>() * 1024 * 1024;
+//    DriveFS::FileManager::DownloadCache.maxCacheSize = vm["cache-size"].as<size_t>() * 1024 * 1024;
 
     if (vm.count("max-concurrent-downloads")) {
         DriveFS::setMaxConcurrentDownload(vm["max-concurrent-downloads"].as<int>());
@@ -163,9 +204,6 @@ int main(int argc, char **argv) {
      ***********************/
     File::executing_uid = geteuid();
     File::executing_gid = getegid();
-    std::string uri = vm["database"].as<std::string>();
-    uri += DATABASENAME;
-    db_handle_t::setDatabase(uri);
     DriveFS::Account account = DriveFS::Account::getAccount(
             vm["database"].as<std::string>());
     account.setRefreshInterval(vm["refresh-interval"].as<int>());
