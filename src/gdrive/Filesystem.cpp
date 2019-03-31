@@ -15,18 +15,6 @@
 
 namespace DriveFS{
 
-    struct _lockObject{
-        _Object* _obj;
-        _lockObject(_Object * obj): _obj(obj){
-//            LOG(INFO) << "locking " << obj->getId();
-            _obj->m_event.wait();
-        }
-        ~_lockObject(){
-//            LOG(INFO) << "unlocking " << _obj->getId();
-            _obj->m_event.signal();
-        }
-    };
-
     inline Account* getAccount(const fuse_req_t &req){
         return static_cast<Account *>(fuse_req_userdata(req));
     }
@@ -135,9 +123,7 @@ namespace DriveFS{
         file->m_event.signal();
         if(file->getIsUploaded()){
             auto account = getAccount(req);
-#warning setattr
-//            const bool status = account->updateObjectProperties(file->getId(), bsoncxx::to_json(file->to_rename_bson()));
-            const bool status = false;
+            const bool status = account->updateObjectProperties(file->getId(), FileManager::asJSONForRename(file));
             if(!status){
                 int reply_err = fuse_reply_err(req, EIO);
                 while(reply_err != 0){
@@ -160,8 +146,8 @@ namespace DriveFS{
 
     void mkdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name, mode_t mode){
         auto parent = FileManager::fromInode(parent_ino);
-        _lockObject test = parent.get();
-        GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
+        _lockObject test{parent.get()};
+        GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name, false);
         if (child) {
             LOG(INFO) << "Mkdir with name " << name << " already existed";
             int reply_err = fuse_reply_err(req, EEXIST);
@@ -173,6 +159,10 @@ namespace DriveFS{
 
         auto account = getAccount(req);
         auto folder = account->createNewChild(parent, name, mode, false);
+        if(!folder){
+            fuse_reply_err(req, EIO);
+            return;
+        }
         struct fuse_entry_param e;
         memset(&e, 0, sizeof(e));
         e.attr = folder->attribute;
@@ -217,11 +207,11 @@ namespace DriveFS{
                     }
                 }
 
-#if FUSE_USE_VERSION >= 30
-                fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
-#else
-                fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
-#endif
+//#if FUSE_USE_VERSION >= 30
+//                fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
+//#else
+//                fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
+//#endif
 
 
         }
@@ -357,19 +347,19 @@ namespace DriveFS{
             account->upsertFileToDatabase(child);
         }
 
-#if FUSE_USE_VERSION >= 30
-        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
-        fuse_lowlevel_notify_inval_inode(account->fuse_session, child->attribute.st_ino, 0, 0);
-        if(newParents)
-            fuse_lowlevel_notify_inval_inode(account->fuse_session, newparent_ino, 0, 0);
-
-#else
-        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
-        fuse_lowlevel_notify_inval_inode(account->fuse_channel, child->attribute.st_ino, 0, 0);
-        if(newParents)
-            fuse_lowlevel_notify_inval_inode(account->fuse_channel, newparent_ino, 0, 0);
-
-#endif
+//#if FUSE_USE_VERSION >= 30
+//        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
+//        fuse_lowlevel_notify_inval_inode(account->fuse_session, child->attribute.st_ino, 0, 0);
+//        if(newParents)
+//            fuse_lowlevel_notify_inval_inode(account->fuse_session, newparent_ino, 0, 0);
+//
+//#else
+//        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
+//        fuse_lowlevel_notify_inval_inode(account->fuse_channel, child->attribute.st_ino, 0, 0);
+//        if(newParents)
+//            fuse_lowlevel_notify_inval_inode(account->fuse_channel, newparent_ino, 0, 0);
+//
+//#endif
 
         int reply_err = fuse_reply_err(req, 0);
         while(reply_err != 0){
@@ -416,65 +406,25 @@ namespace DriveFS{
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
-#warning bsoncxx
-/*
-        try {
-            FileIO *io = (FileIO *) fi->fh;
-            if (io == nullptr) {
-                LOG(ERROR) << "io was null when reading file";
-                int reply_err = fuse_reply_err(req, EIO);
-                while(reply_err != 0){
-                    reply_err = fuse_reply_err(req, EIO);
-                }
-                return;
-            }
-
-            VLOG(10) << "Reading size " << size << " with off " << off << " and "
-                     << ((size + off <= io->m_file->getFileSize()) ? "<=" : ">");
-            if ((size + off) > io->m_file->getFileSize()) {
-                size = io->m_file->getFileSize() - off;
-                VLOG(10) << "adjusting size to " << size << " and file size " << io->m_file->getFileSize();
-            }
-
-            auto buf = io->read(size, off);
-            if(buf == nullptr){
-                LOG(ERROR) << "Buffer was null when trying to read file witih id " << io->m_file->getId();
-                if(io->m_file){
-                    Account *account = getAccount(req);
-                    for(const auto &parent: io->m_file->parents) {
-#if FUSE_USE_VERSION >= 30
-                        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent->attribute.st_ino, 0, 0);
-#else
-                        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent->attribute.st_ino, 0, 0);
-#endif
-                    }
-                   _Object::trash(io->m_file);
-                }
-
-                LOG(ERROR) << "Buffer was null when trying to read file witih id " << io->m_file->getId();
-                fuse_reply_err(req, EIO);
-
-                return;
-            }
-            auto outsize = buf->size();
-
-            if (outsize != size) {
-                LOG(TRACE) << "buffer size was not the same as expected: " << outsize << " vs " << size;
-            }
-
-            int reply_err = fuse_reply_buf(req, (const char *) buf->data(), outsize);
+        FileIO *io = (FileIO *) fi->fh;
+        if (io == nullptr) {
+            LOG(ERROR) << "io was null when reading file";
+            int reply_err = fuse_reply_err(req, EIO);
             while(reply_err != 0){
-                reply_err = fuse_reply_buf(req, (const char *) buf->data(), outsize);
+                reply_err = fuse_reply_err(req, EIO);
             }
-            delete buf;
-        }catch(std::exception &e){
-            LOG(ERROR) << "Reading file" << e.what();
-            int reply_err = fuse_reply_err(req, errno);
-            while(reply_err != 0){
-                reply_err = fuse_reply_err(req, errno);
-            }
+            return;
         }
-        */
+
+        VLOG(10) << "Reading size " << size << " with off " << off << " and "
+                 << ((size + off <= io->m_file->getFileSize()) ? "<=" : ">");
+        if ((size + off) > io->m_file->getFileSize()) {
+            size = io->m_file->getFileSize() - off;
+            VLOG(10) << "adjusting size to " << size << " and file size " << io->m_file->getFileSize();
+        }
+
+        io->read(req, size, off);
+//        fuse_reply_buf(req, (const char *) buf->data(), outsize);
     }
 
     void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi){
@@ -891,11 +841,11 @@ namespace DriveFS{
         e.attr_timeout = 300;
         e.entry_timeout = 300;
 
-#if FUSE_USE_VERSION >= 30
-        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
-#else
-        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
-#endif
+//#if FUSE_USE_VERSION >= 30
+//        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
+//#else
+//        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
+//#endif
 
 
         io->open();

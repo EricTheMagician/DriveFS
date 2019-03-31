@@ -25,9 +25,10 @@
 #include <atomic>
 #include <autoresetevent.h>
 #include <boost/filesystem.hpp>
-
+#include <utility>
 
 namespace fs = boost::filesystem;
+using DownloadResult = std::pair<web::http::http_response, uint_fast8_t>;
 
 namespace DriveFS {
 
@@ -53,7 +54,7 @@ namespace DriveFS {
 
         ~FileIO();
 
-        std::vector<unsigned char> * read(const size_t &size, const off_t &off);
+        void read(fuse_req_t req, const size_t &size, const off_t &off);
 
         void open();
 
@@ -99,8 +100,8 @@ namespace DriveFS {
         }
     public:
 
-        std::vector<unsigned char> * getFromCloud(const size_t &size, const off_t &off);
-        DownloadItem getFromCache(fs::path path, uint64_t chunkStart);
+        void getFromCloud(fuse_req_t req, const size_t &size, const off_t &off);
+        DownloadItem getFromCache(std::string const &cacheName);
         void upload(bool runAsynchronously);
 
         std::string f_name; //f_name for the upload, d_name is the base download name
@@ -125,7 +126,15 @@ namespace DriveFS {
 
         void _upload();
         bool checkFileExists();
-        static void download(GDriveObject file, DownloadItem cache, std::string cacheName, uint64_t start, uint64_t end, uint_fast8_t backoff=0);
+        static bool download(fuse_req_t req, _Object *file, __no_collision_download__ *cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff);
+//        static pplx::task<http_response> download(_Object *file, uint64_t start, uint64_t end);
+//        static bool handleDownloadResponse(http_response &&resp,
+//                                                       fuse_req_t req,
+//                                                       __no_collision_download__ *item,
+//                                                       std::vector<uint8_t> *buf,
+//                                                       std::string cacheName,
+//                                                       uint_fast8_t backoff
+//                                                       );
         bool resumeFileUploadFromUrl(std::string url);
         void move_files_to_download_after_finish_uploading();
         void clearFileFromCache();

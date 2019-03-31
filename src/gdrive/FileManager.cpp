@@ -3,16 +3,17 @@
 #include "gdrive/Account.h"
 #include <pqxx/pqxx>
 #include <cpprest/json.h>
-
-
+#include <boost/thread/recursive_mutex.hpp>
+#include <boost/thread/shared_mutex.hpp>
 
 namespace DriveFS::FileManager{
     boost::compute::detail::lru_cache<ino_t, GDriveObject> inodeToObject(1024);
     boost::compute::detail::lru_cache<std::string, GDriveObject> idToObject(1024);
 
-    PriorityCache<GDriveObject> DownloadCache(1,1);
+
+    PriorityCache DownloadCache(1,1);
     namespace detail {
-        ::AutoResetEvent insertEvent(1);
+        static boost::recursive_mutex  lruMutex;
         static std::vector<std::string> getParentsFromDB(std::string const &id){
             db_handle_t db;
             auto w = db.getWork();
@@ -20,16 +21,21 @@ namespace DriveFS::FileManager{
             sql.reserve(512);
             sql += "SELECT "
                    "parents "
-                   " FROM " + DATABASEDATA +
+                   " FROM " DATABASEDATA 
                    " WHERE trashed=false AND id='" +id+ "'";
             pqxx::result sql_results = w->exec(sql);
 
             std::vector<std::string> results;
             if(sql_results.size() > 0) {
+                if(sql_results[0][0].is_null()){
+                    return results;
+                }
                 pqxx::array_parser array = sql_results[0][0].as_array();
                 std::pair<pqxx::array_parser::juncture, std::string> pair = array.get_next();
-                while (pair.first != pqxx::array_parser::row_end) {
+                while (true) {
                     pair = array.get_next();
+                    if(pair.first == pqxx::array_parser::row_end)
+                        break;
                     results.push_back(pair.second);
                 }
             }
@@ -43,12 +49,12 @@ namespace DriveFS::FileManager{
         std::vector<GDriveObject> getChildren(std::string const &id){
         db_handle_t db;
         auto w = db.getWork();
-        std::string sql;
-        sql.reserve(512);
-        sql += "SELECT "
+        std::string sql = "SELECT "
                "inode "
-               " FROM " + DATABASEDATA +
-               " WHERE trashed=false AND '"+id+ "'=ALL(parents) AND name not like '%/%'";
+               " FROM "  DATABASEDATA 
+               " WHERE trashed=false AND '";
+        sql += w->esc(id);
+        sql += "'=ALL(parents) AND name not like '%/%'";
         pqxx::result result = w->exec(sql);
         std::vector<GDriveObject> results;
         results.reserve(result.size());
@@ -74,13 +80,13 @@ namespace DriveFS::FileManager{
         return detail::getParentsFromDB(id);
     }
 
-    GDriveObject fromParentIdAndName(const std::string &id, char const* name){
+    GDriveObject fromParentIdAndName(const std::string &id, char const* name, bool logSqlFailure){
         db_handle_t db;
         auto w = db.getWork();
         std::string sql;
         sql.reserve(512);
 
-        sql += "SELECT inode FROM " + DATABASEDATA + " WHERE name=\'" + w->esc(name) + "\'";
+        sql += "SELECT inode FROM "  DATABASEDATA  " WHERE name=\'" + w->esc(name) + "\'";
         sql += " and trashed=false and \'" + id + "\'=all(parents) LIMIT 1";
 
         try {
@@ -92,15 +98,20 @@ namespace DriveFS::FileManager{
                        << " and child name " << name;
             return nullptr;
         }catch(pqxx::unexpected_rows &e){
-            LOG(ERROR) << "found to many possibilities for id " << id
-                       << " and child name " << name;
-            LOG(ERROR) << sql;
+            if(logSqlFailure) {
+                LOG(ERROR) << "found to many possibilities for id " << id
+                           << " and child name " << name;
+                LOG(ERROR) << sql;
+            }
             return nullptr;
+        }catch(std::exception &e){
+            LOG(ERROR) << e.what();
         }
 
 
     }
     bool hasId(std::string const & id, bool removeFromCache){
+        std::lock_guard< boost::recursive_mutex> lock(detail::lruMutex);
         auto optional_object = idToObject.get(id);
         if(optional_object && *optional_object){
             if(removeFromCache){
@@ -115,9 +126,7 @@ namespace DriveFS::FileManager{
 
         std::string sql;
         sql.reserve(512);
-        sql += "SELECT 1 FROM ";
-        sql += DATABASEDATA;
-        sql += " WHERE id='";
+        sql += "SELECT 1 FROM " DATABASEDATA " WHERE id='";
         sql += w->esc(id);
         sql += "'";
 
@@ -128,10 +137,12 @@ namespace DriveFS::FileManager{
 
 
     GDriveObject fromId(std::string const &id) {
+        std::lock_guard< boost::recursive_mutex > lock(detail::lruMutex);
         auto optional_object = idToObject.get(id);
         if(optional_object && *optional_object){
             return *optional_object;
         }
+
         db_handle_t db;
         auto w = db.getWork();
         std::string sql;
@@ -148,8 +159,8 @@ namespace DriveFS::FileManager{
                "uid,"      // 8
                "gid,"      // 9
                "mode,"      //10
-               "trashed,"   //11
-               " FROM " + DATABASEDATA +
+               "trashed "   //11
+               " FROM " DATABASEDATA 
                " WHERE trashed=false AND id='";
         sql += id + "'";
         pqxx::row result {};
@@ -160,6 +171,9 @@ namespace DriveFS::FileManager{
             LOG(ERROR) << e.what();
             LOG(ERROR) << "unable to get object for id " << id;
             LOG(ERROR) << sql;
+            return nullptr;
+        }catch(std::exception &e){
+            LOG(ERROR) << e.what();
             return nullptr;
         }
 
@@ -191,6 +205,7 @@ namespace DriveFS::FileManager{
 
     }
     GDriveObject fromInode(ino_t inode){
+        std::lock_guard< boost::recursive_mutex> lock(detail::lruMutex);
         auto optional_object = inodeToObject.get(inode);
         if(optional_object && *optional_object){
             return *optional_object;
@@ -213,7 +228,8 @@ namespace DriveFS::FileManager{
                "gid,"      // 9
                "mode,"      // 10
                "trashed"  // 11
-               " FROM " + DATABASEDATA +
+               " FROM " 
+               DATABASEDATA
                " WHERE trashed=false AND inode=";
         sql += std::to_string(inode);
         pqxx::row result {};
@@ -223,6 +239,9 @@ namespace DriveFS::FileManager{
             LOG(ERROR) << e.what();
             LOG(ERROR) << "unable to get object for inode " << inode;
             LOG(ERROR) << sql;
+            return nullptr;
+        }catch(std::exception &e){
+            LOG(ERROR) << e.what();
             return nullptr;
         }
 
@@ -246,14 +265,22 @@ namespace DriveFS::FileManager{
                                                     ( result[11].is_null() ? false: result[11].as<bool>()) // trahsed
         );
 
-        inodeToObject.insert(inode, so);
-        idToObject.insert(so->getId(), so);
-
-        return so;
+        return insertObjectToMemoryMap(so);
     }
 
-    void insertObjectToMemoryMap(const GDriveObject &object){
-        detail::insertEvent.wait();
+    GDriveObject insertObjectToMemoryMap(const GDriveObject &object){
+        std::lock_guard< boost::recursive_mutex> lock(detail::lruMutex);
+        auto maybeFile = idToObject.get(object->getId());
+        if(maybeFile && *maybeFile){
+            return *maybeFile;
+        }
+        maybeFile = inodeToObject.get(object->getInode());
+        if(maybeFile && *maybeFile){
+            return *maybeFile;
+        }
+
+        inodeToObject.insert(object->getInode(), object);
+        idToObject.insert(object->getId(), object);
         auto file = object.get();
         try{
             inodeToObject.insert(file->attribute.st_ino, object);
@@ -262,7 +289,8 @@ namespace DriveFS::FileManager{
             LOG(ERROR) << "There was an error with inserting an object to the memory database: " << e.what()
                        << "\nExiting because it is probably in a broken state if we were to continue";
         }
-        detail::insertEvent.signal();
+
+        return object;
 
     }
 

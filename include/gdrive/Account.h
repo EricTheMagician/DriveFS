@@ -38,7 +38,7 @@ public:
     BaseAccount::refresh_token(backoff);
   };
 
-  virtual GDriveObject createNewChild(GDriveObject parent, const char *name,
+  virtual GDriveObject createNewChild(GDriveObject const &parent, const char *name,
                                       int mode, bool isFile);
   bool removeChildFromParent(GDriveObject const &child, GDriveObject const &parent);
   virtual void upsertFileToDatabase(GDriveObject file);
@@ -73,8 +73,8 @@ private:
   void linkParentsAndChildren();
   std::string getUploadUrlForFile(http_request, int backoff = 1);
   void generateIds(int_fast8_t backoff = 0);
-  std::string createFolderOnGDrive(const std::string json, int backoff = 0);
-  bool trash(GDriveObject file, int backoff = 0);
+  web::json::value createFolderOnGDrive(std::string const &json, int backoff = 0);
+  bool trash(GDriveObject const &file, int backoff = 0);
   virtual void background_update(std::string teamDriveId);
   std::string getRootFolderId();
   void setMaximumInodeFromDatabase();
@@ -91,9 +91,9 @@ private:
 
 }; // namespace DriveFS
 
-static const std::string DATABASEDATA = "gdrivedata";
-static const std::string DATABASESETTINGS = "drive_settings";
-static const std::string DATABASENAME = "DriveFS";
-static const std::string GDRIVEACCESSTOKENNAME = "access token";
-static const std::string GDRIVEREFRESHTOKENNAME = "refresh_tokens";
-static const std::string GDRIVELASTCHANGETOKEN = "last change token";
+#define DATABASEDATA "gdrivedata"
+#define DATABASESETTINGS "drive_settings"
+#define DATABASENAME "DriveFS"
+#define GDRIVEACCESSTOKENNAME "access token"
+#define GDRIVEREFRESHTOKENNAME "refresh_tokens"
+#define GDRIVELASTCHANGETOKEN "last change token"

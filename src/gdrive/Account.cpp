@@ -3,6 +3,7 @@
 //
 
 #include "gdrive/Account.h"
+#include "gdrive/Filesystem.h"
 #include "BaseFileSystem.h"
 #include <boost/asio.hpp>
 #include <boost/asio/thread_pool.hpp>
@@ -26,7 +27,7 @@ static boost::asio::thread_pool *parseFilesAndFolderThreadPool;
 namespace DriveFS {
 
     namespace detail{
-        void appendSqlRepresentationFromJson(std::string *_sql, json::value file, ino_t nextInode, pqxx::work *w, bool *wasFirst){
+        void appendSqlRepresentationFromJson(std::string *_sql, json::value file, ino_t nextInode, pqxx::work *w, bool *wasFirst, std::string parentId= ""){
             std::string &sql = *_sql;
             try {
                 bool trashed = file.has_field("trashed") ? file["trashed"].as_bool(): false;
@@ -40,9 +41,17 @@ namespace DriveFS {
                 auto capabilities = file["capabilities"];
                 std::string mimeType = file.has_string_field("mimeType")? file["mimeType"].as_string() : "";
 
-                bool isTrashable = capabilities.has_field("canTrash") ? capabilities["canTrash"].as_bool(): false;
-                bool canRename = capabilities.has_field("canRename") ? capabilities["canRename"].as_bool(): false;
-                bool canDownload = capabilities.has_field("canDownload") ? capabilities["canDownload"].as_bool(): false;
+                bool isTrashable = false;
+                bool canRename = false;
+                bool canDownload = false;
+                if(!capabilities.is_null()){
+                    if(capabilities.has_field("canTrash") )
+                        isTrashable =capabilities["canTrash"].as_bool();
+                    if(capabilities.has_field("canRename") )
+                        canRename = capabilities["canRename"].as_bool();
+                    if(capabilities.has_field("canDownload") )
+                        canDownload = capabilities["canDownload"].as_bool();
+                }
                 std::string size = [&file](){
                     if(file.has_string_field("size"))
                         return file["size"].as_string();
@@ -53,27 +62,35 @@ namespace DriveFS {
                 int uid = -1, gid = -1, mode=-1;
                 if(file.has_field("appProperties")){
                     auto appProperties = file["appProperties"];
-                    if(appProperties.has_field(APP_UID)){
-                        uid = atoi(appProperties[APP_UID].as_string().c_str());
-                    }
-                    if(appProperties.has_field(APP_GID)){
-                        gid = atoi(appProperties[APP_GID].as_string().c_str());
-                    }
-                    if(appProperties.has_field(APP_MODE)){
-                        mode = atoi(appProperties[APP_MODE].as_string().c_str());
+                    if(!appProperties.is_null()) {
+                        if (appProperties.has_field(APP_UID)) {
+                            uid = atoi(appProperties[APP_UID].as_string().c_str());
+                        }
+                        if (appProperties.has_field(APP_GID)) {
+                            gid = atoi(appProperties[APP_GID].as_string().c_str());
+                        }
+                        if (appProperties.has_field(APP_MODE)) {
+                            mode = atoi(appProperties[APP_MODE].as_string().c_str());
+                        }
                     }
                 }
                 std::string parents;
                 parents.reserve(1000);
                 bool wasFirstParent = true;
                 parents += "{";
-                for(auto &parent: file["parents"].as_array()){
-                    if(wasFirstParent){
-                        wasFirstParent = false;
-                    }else{
-                        parents +=",";
+                if(parentId.empty()) {
+                    for (auto &parent: file["parents"].as_array()) {
+                        if (wasFirstParent) {
+                            wasFirstParent = false;
+                        } else {
+                            parents += ",";
+                        }
+                        parents += "\"" + parent.as_string() + "\"";
                     }
-                    parents += "\"" + parent.as_string() + "\"";
+                }else{
+                    parents += "'";
+                    parents += parentId;
+                    parents += "'";
                 }
                 parents += "}";
 
@@ -92,7 +109,7 @@ namespace DriveFS {
                 sql += ( canDownload ? "true" : "false");
                 sql += ",";
                 sql += ( trashed ? "true" : "false");
-                sql += ",'" + w->esc(file["modifiedTime"].as_string());
+                sql += ",'"  + w->esc(file["modifiedTime"].as_string());
                 sql += "','" + w->esc(file["createdTime"].as_string());
                 sql += "'," + std::to_string(std::strtoll(file["version"].as_string().c_str(), nullptr, 10));
                 sql += ", " + std::to_string(nextInode);
@@ -105,6 +122,7 @@ namespace DriveFS {
                 LOG(ERROR) << e.what();
                 LOG(DEBUG) << file.serialize();
                 LOG(DEBUG) << sql;
+                assert(false);
                 std::exit(0);
             }
 
@@ -123,7 +141,7 @@ namespace DriveFS {
         pqxx::connection c{m_dbUri + DATABASENAME};
         pqxx::nontransaction w(c);
         std::stringstream sql;
-        sql << "SELECT value, id FROM " <<  DATABASESETTINGS << " WHERE name=\'" << GDRIVELASTCHANGETOKEN << "\'";
+        sql << "SELECT value, id FROM " DATABASESETTINGS " WHERE name=\'" << GDRIVELASTCHANGETOKEN << "\'";
 
         pqxx::result result{w.exec(sql)};
 
@@ -197,13 +215,14 @@ namespace DriveFS {
         std::stringstream sql;
         auto &token = m_oauth2_config.token();
 
-        sql << "INSERT INTO " << DATABASESETTINGS
-            << "(name, value) VALUES ('"
-            << GDRIVEACCESSTOKENNAME << "','"
+        m_refresh_token = token.refresh_token();
+
+        sql <<  "INSERT INTO " DATABASESETTINGS
+                "(name, value) VALUES ('"
+                GDRIVEACCESSTOKENNAME "','"
             << w.esc(token.access_token()) << "'), " ;
 
-        m_refresh_token = token.refresh_token();
-        sql << "('" << w.esc(GDRIVEREFRESHTOKENNAME) << "', '"
+        sql << "('" GDRIVEREFRESHTOKENNAME "', '"
             << w.esc(m_refresh_token) << "');";
         LOG(INFO) << sql.str();
         w.exec(sql);
@@ -219,14 +238,14 @@ namespace DriveFS {
         pqxx::work *w = db.getWork();
         std::string at, rt;
         try {
-            std::stringstream sql;
-            sql << "SELECT value FROM " << DATABASESETTINGS << " WHERE name=\'" << GDRIVEACCESSTOKENNAME << "\';";
-            LOG(INFO) << sql.str();
-            pqxx::row at_ = w->exec1(sql.str());
+            std::string sql =
+            "SELECT value FROM " DATABASESETTINGS " WHERE name=\'" GDRIVEACCESSTOKENNAME "\';";
+            LOG(INFO) << sql;
+            pqxx::row at_ = w->exec1(sql);
             sql.clear();
 
-            sql << "SELECT value FROM " << DATABASESETTINGS << " WHERE name=\'" << GDRIVEREFRESHTOKENNAME << "\';";
-            pqxx::row rt_ = w->exec1(sql.str());
+            sql = "SELECT value FROM " DATABASESETTINGS " WHERE name=\'" GDRIVEREFRESHTOKENNAME "\';";
+            pqxx::row rt_ = w->exec1(sql);
             at = at_[0].c_str();
             rt = rt_[0].c_str();
             w->commit();
@@ -323,9 +342,9 @@ where c.column_b = t.column_b;
                               " VALUES ";
 
 
-                sql_delete += "INSERT INTO ";
+                sql_delete += "UPDATE ";
                 sql_delete += DATABASEDATA;
-                sql_delete += "(id, trashed) VALUES (";
+                sql_delete += " SET trashed=true WHERE id IN (";
 
 
                 bool not_needs_updating = true;
@@ -345,20 +364,21 @@ where c.column_b = t.column_b;
 
                         if (!change.has_object_field("file")) {
                             // this section is for a file being deleted
-                            auto file = change["file"];
 
-                            if (file.has_boolean_field("removed")) {
-                                auto deleted = file["removed"].as_bool();
+                            if (change.has_boolean_field("removed")) {
+                                auto deleted = change["removed"].as_bool();
                                 if (deleted) {
                                     // LOG(DEBUG) << bsoncxx::to_json(doc);
                                     if (change.has_string_field("fileId")) {
                                         std::string fileId = change["fileId"].as_string();
-                                        if (!not_hasItemsToDelete) {
-                                            sql_delete += ",'";
+                                        if(!FileManager::hasId(fileId, true))
+                                            continue;
+                                        if (not_hasItemsToDelete) {
+                                            not_hasItemsToDelete = false;
                                         } else {
-                                            not_hasItemsToDelete = true;
-                                            sql_delete += "'";
+                                            sql_delete += ",";
                                         }
+                                        sql_delete += "'";
                                         sql_delete += fileId;
                                         sql_delete += "'";
                                         childToInvalidate.push_back(fileId);
@@ -392,9 +412,6 @@ where c.column_b = t.column_b;
                         }
 
                         std::vector<std::string> parentIds = FileManager::getParentIds(id);
-                        if(parentIds.empty()){
-                            continue;
-                        }
 
                         std::vector<std::string> newParentIds,  differences;
                         json::array _newParentIds = file["parents"].as_array();
@@ -470,8 +487,8 @@ where c.column_b = t.column_b;
                     }
                     if (!not_hasItemsToDelete) {
                         sql_delete += ")";
-                        sql_delete += " ON CONFLICT (id) DO UPDATE SET "
-                                      "trashed=EXCLUDED.trashed";
+//                                      " ON CONFLICT (id) DO UPDATE SET "
+//                                      "trashed=EXCLUDED.trashed";
 
                         try {
                             w->exec(sql_delete);
@@ -517,10 +534,10 @@ where c.column_b = t.column_b;
 
             }catch (pqxx::sql_error &e) {
                 LOG(ERROR) << e.what();
-                LOG(ERROR) << e.sqlstate();
+                LOG(FATAL) << e.sqlstate();
                 continue;
             }catch (std::exception &e) {
-                LOG(ERROR) << e.what();
+                LOG(FATAL) << e.what();
                 continue;
             }
 
@@ -545,7 +562,8 @@ where c.column_b = t.column_b;
     }
 
     void Account::invalidateId(std::string const &id){
-        invalidateInode(FileManager::fromId(id)->getInode());
+        if(FileManager::hasId(id, true))
+            invalidateInode(FileManager::fromId(id)->getInode());
     }
 
     void Account::linkParentsAndChildren() {
@@ -906,7 +924,7 @@ where c.column_b = t.column_b;
         db_handle_t db;
         pqxx::work *w = db.getWork();
 
-        pqxx::row result = w->exec1("select max(inode) from " + DATABASEDATA);
+        pqxx::row result = w->exec1("select max(inode) from " DATABASEDATA);
         this->inode_count = result[0].as<ino_t>();
 
     }
@@ -922,7 +940,7 @@ where c.column_b = t.column_b;
 
         // check database first
         {
-            std::string sql = "SELECT id FROM " + DATABASEDATA + " WHERE name='_gdrive_root_name_'";
+            std::string sql = "SELECT id FROM " DATABASEDATA " WHERE name='_gdrive_root_name_'";
             pqxx::result result = w->exec(sql);
             if (result.size() == 1) {
                 m_rootFolderId = result[0][0].c_str();
@@ -942,7 +960,7 @@ where c.column_b = t.column_b;
             struct timespec now {time(nullptr),0};
             std::string s_now = getRFC3339StringFromTime(now);
             std::string mimeType = jsonRoot["mimeType"].as_string();
-            sql << "INSERT INTO " << DATABASEDATA << "(uid,gid,mode,id,inode,name,mimeType,trashed,isTrashable,canRename"
+            sql << "INSERT INTO " DATABASEDATA "(uid,gid,mode,id,inode,name,mimeType,trashed,isTrashable,canRename"
                                                      ",modifiedTime,createdTime)"
                 << " VALUES (-1,-1,-1,'"
                 << m_rootFolderId
@@ -954,7 +972,7 @@ where c.column_b = t.column_b;
                 << "') "
 
                 ;
-            sql2 << "INSERT INTO " << DATABASEDATA << "(uid,gid,mode, id,inode,name,mimeType,trashed,isTrashable,canRename"
+            sql2 << "INSERT INTO " DATABASEDATA "(uid,gid,mode, id,inode,name,mimeType,trashed,isTrashable,canRename"
                                                      ",modifiedTime,createdTime,parents) VALUES "
 
                 // insert an empty team drive folder
@@ -1117,7 +1135,7 @@ where c.column_b = t.column_b;
         }
     }
 
-    std::string Account::createFolderOnGDrive(std::string json, int backoff) {
+    web::json::value Account::createFolderOnGDrive(std::string const &json, int backoff) {
         refresh_token();
 
         http_client client("https://www.googleapis.com/drive/v3/", m_http_config);
@@ -1148,38 +1166,61 @@ where c.column_b = t.column_b;
             if (backoff <= 5) {
                 return createFolderOnGDrive(json, backoff + 1);
             }
-            return "";
+            return web::json::value::null();
         }
-        int code = resp.status_code();
-        return resp.extract_utf8string(true).get();
+//        int code = resp.status_code();
+        return resp.extract_json(true).get();
     }
 
-    GDriveObject Account::createNewChild(GDriveObject parent, const char *name,
+    GDriveObject Account::createNewChild(GDriveObject const &parent, const char *name,
                                          int mode, bool isFile) {
 
         auto obj = _Object(inode_count.fetch_add(1, std::memory_order_acquire) + 1,
                            getNextId(), name, mode, isFile);
 
         if (!isFile) {
-#warning createNewChild
-            /*
-            bsoncxx::builder::stream::document doc;
-            doc << "mimeType"
-                << "application/vnd.google-apps.folder"
-                << "id" << obj.getId() << "name" << name << "parents" << open_array
-                << parent->getId() << close_array;
+            web::json::value doc;
+            doc["mimeType"] = web::json::value::string("application/vnd.google-apps.folder");
+            doc["id"] = web::json::value::string(obj.getId());
+            doc["name"] = web::json::value::string(name);
+            doc["parents"][0] = web::json::value::string(parent->getId());
 
-            std::string status = createFolderOnGDrive(bsoncxx::to_json(doc));
+            LOG(INFO) << doc.serialize();
 
-            if (!status.empty()) {
-                mongocxx::pool::entry conn = pool.acquire();
-                mongocxx::database client = conn->database(std::string(DATABASENAME));
-                mongocxx::collection db = client[std::string(DATABASEDATA)];
-                db.insert_one(obj.to_bson());
+            web::json::value status = createFolderOnGDrive(doc.serialize());
+
+            if (!status.is_null()) {
+                db_handle_t db;
+                auto w = db.getWork();
+                std::string sql;
+                sql.reserve(512);
+                sql += "INSERT INTO ";
+                sql += DATABASEDATA;
+                sql += "(id,name,parents,mimeType,md5Checksum,"
+                              "size,"
+                              "isTrashable,canRename,canDownload,"
+                              "trashed,modifiedTime,createdTime, version, inode,uid,gid,mode)"
+                              " VALUES ('";
+                sql += obj.getId();
+                sql += "', '";
+                sql += obj.getName();
+                sql += "', '{\"";
+                sql += parent->getId();
+                sql += "\"}', 'application/vnd.google-apps.folder', '',0,"
+                       "true,true,true,"
+                       "false,'";
+                sql += getRFC3339StringFromTime(obj.attribute.st_mtim);
+                sql += "', '";
+                sql += getRFC3339StringFromTime(obj.attribute.st_atim);
+                sql += "',1, ";
+                sql += std::to_string(obj.getInode());
+                sql += ",-1,-1,-1)";
+                LOG(INFO) << sql;
+                w->exec(sql);
+                w->commit();
             } else {
                 return nullptr;
             }
-             */
         }
 
         auto o = std::make_shared<_Object>(std::move(obj));
@@ -1198,38 +1239,46 @@ where c.column_b = t.column_b;
  * parent of the child
  */
     bool Account::removeChildFromParent(GDriveObject const &child, GDriveObject const &parent) {
-        if (FileManager::getParentIds(child->getId()).size() == 1) {
-            return this->trash(child);
-        } else {
-            std::string toRemove = "[\'";
-            toRemove += parent->getId();
-            toRemove += "\']";
-            bool status = updateObjectProperties(child->getId(), "{}", "", toRemove);
+        auto parentIds = FileManager::getParentIds(child->getId());
+        bool status = false;
+        db_handle_t db;
+        auto w = db.getWork();
+        std::string sql;
+        sql.reserve(256);
+
+        if(parentIds.empty()){
+            return false;
+        }else if (parentIds.size() == 1) {
+            status = this->trash(child);
             if(!status)
                 return false;
-            db_handle_t db;
-            auto w = db.getWork();
-            std::string sql;
-            sql.reserve(256);
             sql += "UPDATE ";
             sql += DATABASEDATA;
-            sql += " parents=array_remove(parents, '";
+            sql += " SET parents='{}', trashed=true where inode=";
+            sql += std::to_string(child->getInode());
+        } else {
+            status = updateObjectProperties(child->getId(), "{}", "", parent->getId());
+            if (!status)
+                return false;
+            sql += "UPDATE ";
+            sql += DATABASEDATA;
+            sql += " SET parents=array_remove(parents, '";
             sql += parent->getId();
             sql += "') where inode=";
-            sql += child->getInode();
-            try{
-                w->exec(sql);
-                w->commit();
-                return true;
-            }catch(std::exception &e){
-                return false;
-            }
-
+            sql += std::to_string(child->getInode());
         }
-        return false;
+        try{
+            w->exec(sql);
+            w->commit();
+            return true;
+        }catch(std::exception &e){
+            LOG(ERROR) << e.what();
+            return false;
+        }
+
     }
 
-    bool Account::trash(GDriveObject file, int backoff) {
+    bool Account::trash(GDriveObject const &file, int backoff) {
         refresh_token();
 
         http_client client(m_apiEndpoint, m_http_config);
@@ -1243,6 +1292,7 @@ where c.column_b = t.column_b;
             resp = client.request(methods::DEL, builder.to_string()).get();
         } catch (std::exception &e) {
             LOG(ERROR) << "There was an error when trying to trash a file";
+            LOG(ERROR) << e.what();
             unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
@@ -1270,7 +1320,7 @@ where c.column_b = t.column_b;
     }
 
     void Account::upsertFileToDatabase(GDriveObject file) {
-#warning upsertFileToDatabase
+#warning upsert
         /*
         if (file) {
             mongocxx::pool::entry conn = pool.acquire();
@@ -1412,13 +1462,10 @@ where c.column_b = t.column_b;
             db_handle_t db;
             auto w = db.getWork();
 
-
-            file->m_event.wait();
+            _lockObject lock(file.get());
             std::string sql;
             sql.reserve(256);
-            sql += "UPDATE ";
-            sql += DATABASEDATA;
-            sql += " SET uploadURL='";
+            sql += "UPDATE " DATABASEDATA " SET uploadURL='";
             sql += w->esc(location);
             sql += "'";
             try {
@@ -1427,7 +1474,6 @@ where c.column_b = t.column_b;
                 LOG(ERROR) << e.what();
                 LOG(DEBUG) << sql;
             }
-            file->m_event.signal();
         }
 
         return location;
