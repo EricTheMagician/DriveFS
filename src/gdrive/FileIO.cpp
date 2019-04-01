@@ -357,6 +357,7 @@ namespace DriveFS{
         bool repliedReq = false;
 
         // serialize the access to the cloud on a per file basis
+        auto localFile = m_file; // keep a hard reference to m_file and use this localFile as "this" can be deleted due to the asychronisity of the code
         _Object *file = m_file.get();
         file->m_event.wait();
         file->m_event.signal();
@@ -367,28 +368,28 @@ namespace DriveFS{
                 return new std::vector<unsigned char>(_size);
             return nullptr;
         }();
-        {
-            if ( (item = DownloadCache.get(chunkId)) || (item = getFromCache(chunkId)) ) {
 
-                if(item->buffer==nullptr || item->buffer->empty()){
-                    item->event.wait();
-                    item->event.signal();
-                }
+        if ( (item = DownloadCache.get(chunkId)) || (item = getFromCache(chunkId)) ) {
 
-                handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
-                repliedReq = !spillOver;
-
-            }else{
-               chunksToDownload.push_back(chunkNumber);
+            if(item->buffer==nullptr || item->buffer->empty()){
+                item->event.wait();
+                item->event.signal();
             }
+
+            handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
+            repliedReq = !spillOver;
+
+        }else{
+           chunksToDownload.push_back(chunkNumber);
         }
+
 
         if(spillOver) {
             const uint64_t chunkNumber2 = chunkNumber + 1;
             const uint64_t chunkStart2 = chunkStart + block_download_size;
             if( !buffer->empty()) {
 
-                chunkId = m_file->getId();
+                chunkId = file->getId();
                 chunkId += "-";
                 chunkId += std::to_string(chunkStart2);
 
@@ -403,7 +404,7 @@ namespace DriveFS{
                     }
 
                     if (item->buffer == nullptr || (!bufferMatchesExpectedBufferSize(item->buffer->size()))) {
-                        LOG(TRACE) << "cache was invalid for " << m_file->getName();
+                        LOG(TRACE) << "cache was invalid for " << file->getName();
                         LOG(FATAL) << "not sure what to do here";
                     } else {
                         assert((spillOverPrecopy + size2) <= buffer->size());
@@ -424,17 +425,7 @@ namespace DriveFS{
 
 
         int off2 = off % block_download_size;
-        if( off == 0 ){
-            auto sz = m_file->getFileSize();
-            if (sz > 0) {
-                auto lastChunk = getChunkNumber(sz-1, block_download_size);
-                chunksToDownload.push_back(lastChunk);
-    //                if(lastChunk > 1){
-    //                    chunksToDownload.push_back(1);
-    //                }
-            }
-
-        }else if( off2 >= FileIO::block_read_ahead_start && off2 <= FileIO::block_read_ahead_end){
+        if( off2 >= FileIO::block_read_ahead_start && off2 <= FileIO::block_read_ahead_end){
             uint64_t start = chunkStart;
             start += spillOver ? 2*block_download_size : block_download_size;
             uint64_t temp = 0;
@@ -444,26 +435,36 @@ namespace DriveFS{
                     break;
                 }
                 auto path_to_buffer2 = FileIO::downloadPath;
-                path_to_buffer2 /= m_file->getId() + "-" + std::to_string(start);
+                path_to_buffer2 /= file->getId() + "-" + std::to_string(start);
                 if(!fs::exists(path_to_buffer2)) {
                     chunksToDownload.push_back(temp / block_download_size);
                 }
             }
 
+        }else if( off == 0 ){
+            auto sz = file->getFileSize();
+            if (sz > 0) {
+                auto lastChunk = getChunkNumber(sz-1, block_download_size);
+                chunksToDownload.push_back(lastChunk);
+    //                if(lastChunk > 1){
+    //                    chunksToDownload.push_back(1);
+    //                }
+            }
+
         }
 
         if(!chunksToDownload.empty()){
-            m_file->m_event.wait();
-//            m_file->create_heap_handles(block_download_size);
+            file->m_event.wait();
+//            file->create_heap_handles(block_download_size);
             for (auto _chunkNumber: chunksToDownload) {
                 auto start = _chunkNumber*block_download_size;
-                std::string cacheName2 = m_file->getId() + "-" + std::to_string(start);
+                std::string cacheName2 = file->getId() + "-" + std::to_string(start);
                 item = DownloadCache.get(cacheName2);
                 if ( (!item) ){
                     DownloadItem cache = std::make_shared<__no_collision_download__>();
 
-                    auto chunkSize = (_chunkNumber +1)*block_download_size >= m_file->getFileSize() ?
-                                     m_file->getFileSize() - _chunkNumber*block_download_size : block_download_size;
+                    auto chunkSize = (_chunkNumber +1)*block_download_size >= file->getFileSize() ?
+                                     file->getFileSize() - _chunkNumber*block_download_size : block_download_size;
                     std::atomic_thread_fence(std::memory_order_release);
                     DownloadCache.insert(cacheName2, cache);
 //                    void FileIO::download(DownloadItem cache, std::string cacheName2, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
@@ -471,7 +472,7 @@ namespace DriveFS{
                     fs::path path(downloadPath);
                     path /= cacheName2;
 
-                    if( (fs::exists(path) && (fs::file_size(path) == block_download_size|| _chunkNumber == getChunkNumber(m_file->getFileSize(), block_download_size)))  ) {
+                    if( (fs::exists(path) && (fs::file_size(path) == block_download_size|| _chunkNumber == getChunkNumber(file->getFileSize(), block_download_size)))  ) {
                         boost::asio::post(*ReadPool,
                                            [io = this, start, chunkSize, path, weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                                auto strong_obj = weak_obj.lock();
@@ -503,7 +504,7 @@ namespace DriveFS{
                                            });
                     } else {
                             boost::asio::post(*DownloadPool,
-                               [req, cacheName2, start, chunkSize, path, weak_file = std::weak_ptr<_Object>(m_file), weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
+                               [req, cacheName2, start, chunkSize, path, weak_file = std::weak_ptr<_Object>(localFile), weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                    auto strong_obj = weak_obj.lock();
                                    auto strong_file = weak_file.lock();
 
@@ -519,7 +520,7 @@ namespace DriveFS{
             }
             item.reset();
             std::atomic_thread_fence(std::memory_order_release);
-            m_file->m_event.signal();
+            file->m_event.signal();
 
 //        mtxDownloadInsert.unlock();
         }

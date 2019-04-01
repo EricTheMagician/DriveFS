@@ -178,8 +178,6 @@ namespace DriveFS{
     }
 
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
-#warning bsoncxx
-        /*
         auto *account = getAccount(req);
         GDriveObject parent(FileManager::fromInode(parent_ino));
         parent->m_event.wait();
@@ -187,15 +185,16 @@ namespace DriveFS{
         GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
 
         if(child){
-                child->trash();
                 parent->m_event.signal();
                 signaled = true;
 
                 LOG(TRACE) << "Deleting file/folder with name " << name << " and parentId: "  << parent->getId();
 
                 if (child->getIsUploaded()) {
-                    {
-                        account->removeChildFromParent(child, parent);
+                    bool status =account->removeChildFromParent(child, parent);
+                    if(!status){
+                        fuse_reply_err(req, EIO);
+                        return;
                     }
                 }else{
                     parent->removeChild(child);
@@ -206,6 +205,7 @@ namespace DriveFS{
                         account->upsertFileToDatabase(child);
                     }
                 }
+                child->trash();
 
 //#if FUSE_USE_VERSION >= 30
 //                fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
@@ -227,7 +227,7 @@ namespace DriveFS{
                 reply_err = fuse_reply_err(req, 0);
             }
         }
-        */
+
     }
 
     void rmdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name){

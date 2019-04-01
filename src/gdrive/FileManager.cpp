@@ -115,6 +115,7 @@ namespace DriveFS::FileManager{
         auto optional_object = idToObject.get(id);
         if(optional_object && *optional_object){
             if(removeFromCache){
+                std::lock_guard lock(detail::lruMutex);
                 idToObject.insert(id, nullptr);
                 inodeToObject.insert((*optional_object)->getInode(), nullptr);
             }
@@ -310,6 +311,21 @@ namespace DriveFS::FileManager{
         return doc.serialize();
 
     }
+
+    bool markFileAsTrashed(std::string const &id){
+        std::string sql;
+        sql.reserve(150);
+        snprintf(sql.data(), 150, "UPDATE " DATABASEDATA " SET trashe=true where id='%s'", id.c_str());
+        db_handle_t db;
+        auto w = db.getWork();
+        try {
+            w->exec(sql);
+            w->commit();
+        } catch (std::exception &e) {
+            LOG(ERROR) << "Error marking file as trashed";
+        }
+    }
+
 
 
 }

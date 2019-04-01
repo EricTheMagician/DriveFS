@@ -11,7 +11,7 @@
 #include <easylogging++.h>
 #include <atomic>
 #include <boost/compute/detail/lru_cache.hpp>
-#include <boost/thread/shared_mutex.hpp>
+#include <boost/thread/recursive_mutex.hpp>
 #include "autoresetevent.h"
 
 //using __no_collision_download__ = std::vector<unsigned char>;
@@ -59,18 +59,18 @@ public:
             idToDownload( std::ceil(max_cache_size * 1.2 / block_download_size )),
             m_block_download_size(block_download_size){
     }
-    void insert(std::string id, DownloadItem item){
-        boost::unique_lock lock(_access);
+    void insert(std::string const &id, DownloadItem const &item){
+        std::lock_guard lock(_access);
         idToDownload.insert(id, item);
     }
 
-    void remove(std::string id){
-        boost::unique_lock lock(_access);
+    void remove(std::string const &id){
+        std::lock_guard lock(_access);
         idToDownload.insert(id, nullptr);
     }
 
-    DownloadItem get(std::string id){
-        boost::shared_lock lock(_access);
+    DownloadItem get(std::string const &id){
+        std::lock_guard lock(_access);
         boost::optional<DownloadItem> maybeDownload = idToDownload.get(id);
         if(maybeDownload){
             return *maybeDownload;
@@ -83,7 +83,7 @@ public:
 
 private:
     boost::compute::detail::lru_cache<std::string, DownloadItem> idToDownload; // queue storing cached data by last access
-    boost::shared_mutex  _access;
+    boost::recursive_mutex  _access;
 //    friend
 };
 

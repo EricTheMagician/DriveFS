@@ -57,7 +57,6 @@ public:
                                       int backoff = 0);
   std::string getNextId();
   inline const std::string & getDBUri() const {return  m_dbUri;}
-  void removeFileWithIDFromDB(std::string id);
 
 
 protected:

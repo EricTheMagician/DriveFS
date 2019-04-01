@@ -89,6 +89,19 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    /***************
+     *
+     * Check for configuration
+     *
+     **************/
+
+
+    if (vm.count("config-file")) {
+        std::ifstream ifs{vm["config-file"].as<std::string>().c_str()};
+        if (ifs)
+            store(po::parse_config_file(ifs, all_desc), vm);
+    }
+
     /******************
      *
      * Find Duplicates
@@ -110,16 +123,9 @@ int main(int argc, char **argv) {
 
     /***************
      *
-     * Configuration
+     * Check for mountpoint
      *
      **************/
-
-    if (vm.count("config-file")) {
-        std::ifstream ifs{vm["config-file"].as<std::string>().c_str()};
-        if (ifs)
-            store(po::parse_config_file(ifs, all_desc), vm);
-    }
-
 
     if ( vm.count("mount") == 0) {
         std::cout << "Mountpoint missing.\n";

@@ -905,18 +905,6 @@ where c.column_b = t.column_b;
             w->exec(sql);
             w->commit();
 
-            // settings.find_one_and_update(
-            //     document{} << "name" << std::string(GDRIVELASTCHANGETOKEN) << "id"
-            //                << (teamDriveId.empty() ? "root" : teamDriveId) <<
-            //                finalize,
-            //     document{} << "$set" << open_document << "value"
-            //                << m_newStartPageToken[teamDriveId] << close_document
-            //                << finalize,
-            //     find_and_upsert
-
-            // );
-            //            if (updateCache)
-            //                m_account->updateCache();
         }
     }
 
@@ -1247,9 +1235,10 @@ where c.column_b = t.column_b;
         sql.reserve(256);
 
         if(parentIds.empty()){
-            return false;
+            return true;
         }else if (parentIds.size() == 1) {
-            status = this->trash(child);
+
+            status = child->getIsUploaded() ? true : this->trash(child);
             if(!status)
                 return false;
             sql += "UPDATE ";
@@ -1257,7 +1246,7 @@ where c.column_b = t.column_b;
             sql += " SET parents='{}', trashed=true where inode=";
             sql += std::to_string(child->getInode());
         } else {
-            status = updateObjectProperties(child->getId(), "{}", "", parent->getId());
+            status = child->getIsUploaded() ? true : updateObjectProperties(child->getId(), "{}", "", parent->getId());
             if (!status)
                 return false;
             sql += "UPDATE ";
@@ -1500,9 +1489,6 @@ where c.column_b = t.column_b;
 
     bool Account::upload(std::string uploadUrl, std::string filePath,
                          size_t fileSize, int64_t start, std::string mimeType) {
-#warning upload
-        return true;
-        /*
         refresh_token();
         boost::system::error_code ec;
         if (!fs::exists(filePath, ec) || ec) {
@@ -1540,18 +1526,20 @@ where c.column_b = t.column_b;
             stream.close();
             if (status_code == 200 || status_code == 201) {
 
-                bsoncxx::document::value doc =
-                        bsoncxx::from_json(resp.extract_utf8string().get());
-                bsoncxx::document::view value = doc.view();
+//                bsoncxx::document::value doc =
+//                        bsoncxx::from_json(resp.extract_utf8string().get());
+//                bsoncxx::document::view value = doc.view();
+                auto value = resp.extract_json().get();
                 try {
-                    if (auto fileId = value["id"]) {
-                        const auto id = std::string(fileId);
-                        auto cursor = _Object::idToObject.find(id);
-                        if (cursor != _Object::idToObject.end()) {
-                            cursor->second->setIsUploaded(true);
+
+                    if (value.has_string_field("id")) {
+                        auto const  id = value["id"].as_string();
+                        auto const obj = FileManager::fromId(id);
+                        if (obj) {
+                            obj->setIsUploaded(true);
                         } else {
                             // if we are here, it's probably because the file has been deleted.
-                            LOG(ERROR) << "We should not reach here: " << id;
+                            LOG(FATAL) << "We should not reach here: " << id;
                         }
                     }
                 } catch (std::exception &e) {
@@ -1575,7 +1563,7 @@ where c.column_b = t.column_b;
             LOG(ERROR) << e.what();
             return false;
         }
-         */
+
     }
 
     std::optional<int64_t> Account::getResumableUploadPoint(std::string url,
@@ -1672,21 +1660,6 @@ where c.column_b = t.column_b;
         }
 
         return true;
-    }
-    void Account::removeFileWithIDFromDB(std::string id) {
-#warning removeFileWithIDFromDB
-        /*
-        mongocxx::pool::entry conn = pool.acquire();
-        mongocxx::database client = conn->database(std::string(DATABASENAME));
-        mongocxx::collection db = client[std::string(DATABASEDATA)];
-        try {
-            db.delete_one(document{} << "id" << id << finalize);
-        } catch (std::exception &e) {
-            LOG(ERROR)
-                    << "There was an error when removing an item from the databasee: "
-                    << e.what();
-        }
-         */
     }
 
     void Account::invalidateParentEntries(const DriveFS::GDriveObject &obj) {
