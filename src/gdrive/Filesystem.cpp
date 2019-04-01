@@ -197,13 +197,12 @@ namespace DriveFS{
                         return;
                     }
                 }else{
-                    parent->removeChild(child);
-                    child->removeParent(parent);
-                    if(child->parents.empty()) {
-                        account->removeFileWithIDFromDB(child->getId());
-                    }else{
-                        account->upsertFileToDatabase(child);
-                    }
+#warning todo
+//                    if(child->parents.empty()) {
+//                        account->removeFileWithIDFromDB(child->getId());
+//                    }else{
+//                        account->upsertFileToDatabase(child);
+//                    }
                 }
                 child->trash();
 

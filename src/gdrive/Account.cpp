@@ -1241,20 +1241,12 @@ where c.column_b = t.column_b;
             status = child->getIsUploaded() ? true : this->trash(child);
             if(!status)
                 return false;
-            sql += "UPDATE ";
-            sql += DATABASEDATA;
-            sql += " SET parents='{}', trashed=true where inode=";
-            sql += std::to_string(child->getInode());
+            snprintf( sql.data(), 256, "UPDATE " DATABASEDATA " SET parents='{}', trashed=true where inode=%lu", child->getInode());
         } else {
             status = child->getIsUploaded() ? true : updateObjectProperties(child->getId(), "{}", "", parent->getId());
             if (!status)
                 return false;
-            sql += "UPDATE ";
-            sql += DATABASEDATA;
-            sql += " SET parents=array_remove(parents, '";
-            sql += parent->getId();
-            sql += "') where inode=";
-            sql += std::to_string(child->getInode());
+            snprintf( sql.data(), 256, "UPDATE " DATABASEDATA " SET parents=array_remove(parents, '%s') where inode=%lu", parent->getId().c_str(), child->getInode());
         }
         try{
             w->exec(sql);

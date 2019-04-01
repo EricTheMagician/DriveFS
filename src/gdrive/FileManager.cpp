@@ -19,10 +19,10 @@ namespace DriveFS::FileManager{
             auto w = db.getWork();
             std::string sql;
             sql.reserve(512);
-            sql += "SELECT "
+            snprintf(sql.data(), 512, "SELECT "
                    "parents "
                    " FROM " DATABASEDATA 
-                   " WHERE trashed=false AND id='" +id+ "'";
+                   " WHERE trashed=false AND id='%s'", id.c_str());
             pqxx::result sql_results = w->exec(sql);
 
             std::vector<std::string> results;
@@ -49,12 +49,15 @@ namespace DriveFS::FileManager{
         std::vector<GDriveObject> getChildren(std::string const &id){
         db_handle_t db;
         auto w = db.getWork();
-        std::string sql = "SELECT "
+        std::string sql;
+        sql.reserve(512);
+        snprintf(sql.data(), 512,
+               "SELECT "
                "inode "
                " FROM "  DATABASEDATA 
-               " WHERE trashed=false AND '";
-        sql += w->esc(id);
-        sql += "'=ALL(parents) AND name not like '%/%'";
+               " WHERE trashed=false AND '%s'=ALL(parents) AND name not like '%%/%%'",
+                 w->esc(id).c_str()
+                 );
         pqxx::result result = w->exec(sql);
         std::vector<GDriveObject> results;
         results.reserve(result.size());
@@ -86,8 +89,7 @@ namespace DriveFS::FileManager{
         std::string sql;
         sql.reserve(512);
 
-        sql += "SELECT inode FROM "  DATABASEDATA  " WHERE name=\'" + w->esc(name) + "\'";
-        sql += " and trashed=false and \'" + id + "\'=all(parents) LIMIT 1";
+        snprintf(sql.data(), 512, "SELECT inode FROM "  DATABASEDATA  " WHERE name='%s' and trashed=false and '%s'=all(parents) LIMIT 1", w->esc(name).c_str(), id.c_str());
 
         try {
             pqxx::row result = w->exec1(sql);
@@ -127,9 +129,7 @@ namespace DriveFS::FileManager{
 
         std::string sql;
         sql.reserve(512);
-        sql += "SELECT 1 FROM " DATABASEDATA " WHERE id='";
-        sql += w->esc(id);
-        sql += "'";
+        snprintf(sql.data(), 512, "SELECT 1 FROM " DATABASEDATA " WHERE id='%s'",  w->esc(id).c_str());
 
         pqxx::result result = w->exec(sql);
         return result.size() > 0;
@@ -148,7 +148,8 @@ namespace DriveFS::FileManager{
         auto w = db.getWork();
         std::string sql;
         sql.reserve(512);
-        sql += "SELECT "
+        snprintf(sql.data(),  512,
+               "SELECT "
                "name,"            // 0
                "size,"             // 1
                "mimeType,"         // 2
@@ -162,8 +163,8 @@ namespace DriveFS::FileManager{
                "mode,"      //10
                "trashed "   //11
                " FROM " DATABASEDATA 
-               " WHERE trashed=false AND id='";
-        sql += id + "'";
+               " WHERE trashed=false AND id='%s'",id.c_str());
+
         pqxx::row result {};
 
         try{
@@ -216,7 +217,8 @@ namespace DriveFS::FileManager{
         auto w = db.getWork();
         std::string sql;
         sql.reserve(512);
-        sql += "SELECT "
+        snprintf(sql.data(), 512,
+               "SELECT "
                "name,"            // 0
                "size,"             // 1
                "mimeType,"         // 2
@@ -231,8 +233,7 @@ namespace DriveFS::FileManager{
                "trashed"  // 11
                " FROM " 
                DATABASEDATA
-               " WHERE trashed=false AND inode=";
-        sql += std::to_string(inode);
+               " WHERE trashed=false AND inode=%lu", inode);
         pqxx::row result {};
         try{
             result = w->exec1(sql);
@@ -312,10 +313,10 @@ namespace DriveFS::FileManager{
 
     }
 
-    bool markFileAsTrashed(std::string const &id){
+    bool removeFileFromDatabase(std::string const &id){
         std::string sql;
-        sql.reserve(150);
-        snprintf(sql.data(), 150, "UPDATE " DATABASEDATA " SET trashe=true where id='%s'", id.c_str());
+        sql.reserve(256);
+        snprintf(sql.data(), 256, "DELETE FROOM" DATABASEDATA " WHERE id='%s'", id.c_str());
         db_handle_t db;
         auto w = db.getWork();
         try {
@@ -323,6 +324,7 @@ namespace DriveFS::FileManager{
             w->commit();
         } catch (std::exception &e) {
             LOG(ERROR) << "Error marking file as trashed";
+            LOG(ERROR) << e.what();
         }
     }
 

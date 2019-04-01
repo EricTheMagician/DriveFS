@@ -22,6 +22,7 @@
 #include "gdrive/Account.h"
 #include "gdrive/FileIO.h"
 #include "gdrive/FileManager.h"
+#include "Database.h"
 
 #define INVALID_CACHE_DELETED 4
 
@@ -56,6 +57,7 @@ void handleReplyData(fuse_req_t req, __no_collision_download__ *item, std::vecto
 //                   << "ID: " << m_file->getId()
 //                   << "\nfileSize: " << m_file->getFileSize()
                    << "\nbufferSize: " << item->buffer->size()
+                   << "\nstart: " << start
                    << "\n(off,size)  (" << off << ", " << size  << ")";
 
     assert((start+size) <= item->buffer->size());
@@ -252,32 +254,33 @@ namespace DriveFS{
         cache->event.signal();
 
         //write buffer to disk
-//        boost::asio::post(WritePool,
-//                           [cacheName, weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
-//                               auto strong_cache = weak_obj.lock();
-//                               if (strong_cache && !(strong_cache->isInvalid)) {
-//                                   fs::path path = cachePath; path  /= "download" / cacheName;
-//                                   FILE *fp = fopen(path.string().c_str(), "wb");
-//                                   if (fp != nullptr) {
-//                                       fwrite(strong_cache->buffer->data(), sizeof(unsigned char), strong_cache->buffer->size(), fp);
-//                                       fclose(fp);
-//                                       fs::permissions(path, fs::owner_all);
-//                                       insertFileToCacheDatabase(path, strong_cache->buffer->size());
-//                                   }
-//                                   strong_cache.reset();
-//                               }
-//                           });
+        boost::asio::post(WritePool,
+                           [cacheName, id=file->getId()]() -> void {
+                               DownloadItem strong_cache = DownloadCache.get(cacheName);
+                               if (strong_cache) {
+                                   fs::path path = downloadPath;
+                                   path /= cacheName;
+                                   FILE *fp = fopen(path.string().c_str(), "wb");
+                                   if (fp != nullptr) {
+                                       fwrite(strong_cache->buffer->data(), sizeof(unsigned char), strong_cache->buffer->size(), fp);
+                                       fclose(fp);
+                                       fs::permissions(path, fs::owner_all);
+                                       insertFileToCacheDatabase(path, strong_cache->buffer->size());
+                                   }
+                                   strong_cache.reset();
+                               }
+                           });
 
-        fs::path path = downloadPath;
-        path /= cacheName;
-        FILE *fp = fopen(path.string().c_str(), "wb");
-        if (fp != nullptr){
-            auto const * buf = cache->buffer;
-            fwrite(buf->data(), sizeof(unsigned char), buf->size(), fp);
-            fclose(fp);
-            fs::permissions(path, fs::owner_all);
-            insertFileToCacheDatabase(path, buf->size());
-        }
+//        fs::path path = downloadPath;
+//        path /= cacheName;
+//        FILE *fp = fopen(path.string().c_str(), "wb");
+//        if (fp != nullptr){
+//            auto const * buf = cache->buffer;
+//            fwrite(buf->data(), sizeof(unsigned char), buf->size(), fp);
+//            fclose(fp);
+//            fs::permissions(path, fs::owner_all);
+//            insertFileToCacheDatabase(path, buf->size());
+//        }
 //        fs::permissions(path, fs::owner_all);
 
 
@@ -327,10 +330,9 @@ namespace DriveFS{
 
         // copy data
         item.event.signal();
+        item.event.signal();
         DownloadItem shared = std::make_shared<__no_collision_download__>(std::move(item));
-        FileManager::DownloadCache.insert(chunkName, shared);
-        return shared;
-
+        return FileManager::DownloadCache.insert(chunkName, shared);
 
     }
 
@@ -369,13 +371,9 @@ namespace DriveFS{
             return nullptr;
         }();
 
-        if ( (item = DownloadCache.get(chunkId)) || (item = getFromCache(chunkId)) ) {
-
-            if(item->buffer==nullptr || item->buffer->empty()){
-                item->event.wait();
-                item->event.signal();
-            }
-
+        if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId)) )
+             && (item->buffer != nullptr || item->wait() )
+             && bufferMatchesExpectedBufferSize(item->buffer->size()) ) {
             handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
             repliedReq = !spillOver;
 
@@ -387,7 +385,7 @@ namespace DriveFS{
         if(spillOver) {
             const uint64_t chunkNumber2 = chunkNumber + 1;
             const uint64_t chunkStart2 = chunkStart + block_download_size;
-            if( !buffer->empty()) {
+            if( buffer != nullptr) {
 
                 chunkId = file->getId();
                 chunkId += "-";
@@ -397,21 +395,13 @@ namespace DriveFS{
                 cacheName = chunkId;
                 DownloadItem item;
 
-                if ((item = DownloadCache.get(chunkId)) || (item = getFromCache(chunkId)) ){
-                    if (item->buffer == nullptr ) {
-                        item->event.wait();
-                        item->event.signal();
-                    }
-
-                    if (item->buffer == nullptr || (!bufferMatchesExpectedBufferSize(item->buffer->size()))) {
-                        LOG(TRACE) << "cache was invalid for " << file->getName();
-                        LOG(FATAL) << "not sure what to do here";
-                    } else {
-                        assert((spillOverPrecopy + size2) <= buffer->size());
-                        handleReplyData(req, item.get(), buffer, size2, 0, spillOver, &spillOverPrecopy);
-                        repliedReq = true;
-                    }
-
+//                if ((item = DownloadCache.get(chunkId)) || (item = getFromCache(chunkId)) ){
+                if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId)) )
+                     && (item->buffer != nullptr || item->wait() )
+                     && bufferMatchesExpectedBufferSize(item->buffer->size()) ) {
+                    assert((spillOverPrecopy + size2) <= buffer->size());
+                    handleReplyData(req, item.get(), buffer, size2, 0, spillOver, &spillOverPrecopy);
+                    repliedReq = true;
                 }  else {
                     chunksToDownload.push_back(chunkNumber2);
                 }
@@ -527,7 +517,11 @@ namespace DriveFS{
 
         if(!repliedReq){
             if( buffer != nullptr) delete buffer;
-            getFromCloud(req, _size, off);
+            if(!chunksToDownload.empty()){
+                getFromCloud(req, _size, off);
+            }else{
+                LOG(FATAL) << "this shouldn't happen";
+            }
         }
 
     }
@@ -1099,13 +1093,14 @@ namespace DriveFS{
     }
 
     void FileIO::insertFileToCacheDatabase(fs::path path, size_t size){
-#warning insertFileToCacheDatabase
-        /*
         mongocxx::pool::entry conn = m_account->pool.acquire();
         mongocxx::database client = conn->database(std::string(DATABASENAME));
         mongocxx::collection db = client[std::string(DBCACHENAME)];
         mongocxx::options::update option;
         option.upsert(true);
+
+        db_handle_t db;
+
 
         try {
             db.update_one(
@@ -1124,7 +1119,6 @@ namespace DriveFS{
         }
 
         incrementCacheSize(size);
-*/
     }
     void FileIO::insertFilesToCacheDatabase(const std::vector<fs::path> &paths, const std::vector<size_t> &sizes){
 #warning insertFilesToCacheDatabase

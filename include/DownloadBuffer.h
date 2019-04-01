@@ -49,6 +49,12 @@ struct __no_collision_download__{
     std::vector<unsigned char>* buffer;
     AutoResetEvent event;
 
+    bool wait(){
+        event.wait();
+        event.signal();
+        return true;
+    }
+
 
 };
 
@@ -59,9 +65,14 @@ public:
             idToDownload( std::ceil(max_cache_size * 1.2 / block_download_size )),
             m_block_download_size(block_download_size){
     }
-    void insert(std::string const &id, DownloadItem const &item){
+    DownloadItem insert(std::string const &id, DownloadItem const &item){
         std::lock_guard lock(_access);
+        auto optional = idToDownload.get(id);
+        if(optional && *optional){
+            return *optional;
+        }
         idToDownload.insert(id, item);
+        return item;
     }
 
     void remove(std::string const &id){
