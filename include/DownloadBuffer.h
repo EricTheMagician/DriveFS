@@ -75,6 +75,11 @@ public:
         return item;
     }
 
+    bool contains(std::string const &id){
+        std::lock_guard lock(_access);
+        return idToDownload.contains(id);
+    }
+
     void remove(std::string const &id){
         std::lock_guard lock(_access);
         idToDownload.insert(id, nullptr);
@@ -87,6 +92,10 @@ public:
             return *maybeDownload;
         }
         return nullptr;
+    }
+
+    void setMaxCacheSize(size_t cacheSize){
+        this->idToDownload = boost::compute::detail::lru_cache<std::string, DownloadItem>( std::ceil(cacheSize * 1.2 / m_block_download_size ));
     }
 
 public:

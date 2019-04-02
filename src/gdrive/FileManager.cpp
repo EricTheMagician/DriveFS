@@ -108,8 +108,8 @@ namespace DriveFS::FileManager{
             return nullptr;
         }catch(std::exception &e){
             LOG(ERROR) << e.what();
+            return nullptr;
         }
-
 
     }
     bool hasId(std::string const & id, bool removeFromCache){
@@ -322,10 +322,13 @@ namespace DriveFS::FileManager{
         try {
             w->exec(sql);
             w->commit();
+            return true;
         } catch (std::exception &e) {
             LOG(ERROR) << "Error marking file as trashed";
             LOG(ERROR) << e.what();
         }
+
+        return false;
     }
 
 

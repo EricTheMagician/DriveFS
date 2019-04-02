@@ -189,7 +189,7 @@ int main(int argc, char **argv) {
     DriveFS::FileIO::move_files_to_download_on_finish_upload = vm["move-to-download"].as<bool>();
 
     DriveFS::FileManager::DownloadCache.m_block_download_size = DriveFS::FileIO::block_download_size;
-//    DriveFS::FileManager::DownloadCache.maxCacheSize = vm["cache-size"].as<size_t>() * 1024 * 1024;
+    DriveFS::FileManager::DownloadCache.setMaxCacheSize(vm["cache-size"].as<size_t>() * 1024 * 1024);
 
     if (vm.count("max-concurrent-downloads")) {
         DriveFS::setMaxConcurrentDownload(vm["max-concurrent-downloads"].as<int>());

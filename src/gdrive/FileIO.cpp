@@ -27,7 +27,7 @@
 #define INVALID_CACHE_DELETED 4
 
 static std::mutex deleteCacheMutex;
-#define DBCACHENAME "FileCacheDB"
+#define DBCACHENAME "CacheDB"
 using namespace web::http::client;          // HTTP client features
 using Object = DriveFS::_Object;
 
@@ -257,7 +257,7 @@ namespace DriveFS{
         boost::asio::post(WritePool,
                            [cacheName, id=file->getId()]() -> void {
                                DownloadItem strong_cache = DownloadCache.get(cacheName);
-                               if (strong_cache) {
+                               if (strong_cache && strong_cache->buffer != nullptr) {
                                    fs::path path = downloadPath;
                                    path /= cacheName;
                                    FILE *fp = fopen(path.string().c_str(), "wb");
@@ -456,7 +456,10 @@ namespace DriveFS{
                     auto chunkSize = (_chunkNumber +1)*block_download_size >= file->getFileSize() ?
                                      file->getFileSize() - _chunkNumber*block_download_size : block_download_size;
                     std::atomic_thread_fence(std::memory_order_release);
-                    DownloadCache.insert(cacheName2, cache);
+                    DownloadItem cache2 = DownloadCache.insert(cacheName2, cache);
+                    if(cache.get() != cache2.get()){
+                        continue;
+                    }
 //                    void FileIO::download(DownloadItem cache, std::string cacheName2, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
 
                     fs::path path(downloadPath);
@@ -888,19 +891,13 @@ namespace DriveFS{
 
     void FileIO::checkCacheSize() {
 
-#warning checkCacheSize
-        /*
-        mongocxx::pool::entry conn = m_account->pool.acquire();
-        mongocxx::database client = conn->database(std::string(DATABASENAME));
-        mongocxx::collection db = client[std::string(DBCACHENAME)];
+        db_handle_t db;
+        auto w = db.getWork();
 
         // reset the database to mark all unvisited files
-//        db.update_many(
-//                document{} << finalize,
-//                document{} << "$set" << open_document << "exists" << false << close_document << finalize
-//        );
+        std::string sql = "UPDATE " DBCACHENAME " SET exists=false";
+        w->exec(sql);
 
-        mongocxx::bulk_write documents;
         size_t size;
         time_t mtime;
         struct stat st;
@@ -908,58 +905,74 @@ namespace DriveFS{
 
         bool needsUpdating = false;
         uint8_t count = 0;
+        sql.reserve(4200);
+        std::string sql_insert;
+        sql_insert.reserve(1024*1024*4);
+        sql_insert += "INSERT INTO " DBCACHENAME "(path,size,mtime,exists) VALUES ";
+        bool needsToInsert = false;
         for(fs::directory_entry& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {})) {
-//            std::cout << entry << "\n";
             if(fs::exists(entry)) {
                 fs::permissions(entry, fs::owner_all);
-                needsUpdating = true;
                 size = fs::file_size(entry);
                 incrementCacheSize(size);
                 auto path = entry.path();
                 stat(path.string().c_str(), &st);
 
-                auto maybeFound = db.find_one(document{} << "filename" << path.string() << finalize );
-                if(maybeFound){
-                    auto doc = maybeFound.value();
-                    auto value = doc.view();
-                    if(value["mtime"].get_int64() == st.st_mtim.tv_sec && value["size"].get_int64() == size ){
+                snprintf(sql.data(), 4200, "SELECT mtime, size FROM " DBCACHENAME " WHERE path='%s'", path.string().c_str());
+                auto results = w->exec(sql);
+                if(results.size() > 0){
+                    auto doc = results[0];
+                    if(doc[0].as<int64_t>() == st.st_mtim.tv_sec && doc[1].as<int64_t>() == size ){
                         continue;
                     }else{
-                        mongocxx::model::update_one upsert_op(
-                                document{} << "filename" << path.string() << finalize,
-                                document{} << "$set" << open_document << "filename" << path.string()
-                                           << "size" << ((int64_t) size)
-                                           << "mtime" << st.st_mtim.tv_sec << close_document
-                                           << finalize
-                        );
-                        documents.append(upsert_op);
-
+                        if(needsUpdating)
+                            sql_insert += ",";
+                        else
+                            needsUpdating = true;
+                        needsToInsert = true;
+                        sql_insert += "('";
+                        sql_insert += path.string();
+                        sql_insert += "',";
+                        sql_insert += std::to_string(size);
+                        sql_insert += ",";
+                        sql_insert += std::to_string(st.st_mtim.tv_sec);
+                        sql_insert += ", true)";
                     }
                 }else{
-                    mongocxx::model::insert_one insert_op(
-                            document{} << "filename" << path.string()
-                                       << "size" << ((int64_t) size)
-                                       << "mtime" << st.st_mtim.tv_sec
-                                       << finalize
-                    );
-                    documents.append(insert_op);
+                    if(needsUpdating)
+                        sql_insert += ",";
+                    else
+                        needsUpdating = true;
+
+                    needsToInsert = true;
+                    sql_insert += "('";
+                    sql_insert += path.string();
+                    sql_insert += "',";
+                    sql_insert += std::to_string(size);
+                    sql_insert += ",";
+                    sql_insert += std::to_string(st.st_mtim.tv_sec);
+                    sql_insert += ", true) ";
+
                 }
 
-
-                count++;
-                if(count == 100){
-                    db.bulk_write(documents);
-                    count = 0;
-                    needsUpdating = false;
-                    documents = mongocxx::bulk_write();
-                }
             }
-
-
         }
-        if(needsUpdating && count > 0)
-            db.bulk_write(documents);
-            */
+        if(needsToInsert){
+            sql_insert += "ON CONFLICT (path) DO UPDATE SET "
+                   "size=EXCLUDED.size,"
+                   "exists=true,"
+                   "mtime=EXCLUDED.mtime";
+            try {
+                w->exec(sql_insert);
+            } catch (std::exception &e) {
+                LOG(INFO) << sql_insert;
+                LOG(FATAL) << e.what();
+            }
+        }
+        sql = "DELETE FROM " DBCACHENAME " WHERE exists=false";
+        w->exec(sql);
+        w->commit();
+
     }
 
     void setMaxConcurrentDownload(int n){
@@ -980,7 +993,6 @@ namespace DriveFS{
     }
 
     void FileIO::deleteFilesFromCacheOnDisk(){
-#warning deleteFilesFromCacheOnDisk
         int64_t oldSize = FileIO::cacheSize.load(std::memory_order_relaxed);
         int64_t workingSize = oldSize,
         targetSize = ((double)FileIO::maxCacheOnDisk) * 0.9;
@@ -988,59 +1000,54 @@ namespace DriveFS{
         LOG(INFO) << "Deleting files until target size is reached";
         LOG(DEBUG) << "Target Size: " << targetSize;
         LOG(DEBUG) << "Current Size: "  << oldSize;
-/*
-        mongocxx::pool::entry conn = m_account->pool.acquire();
-        mongocxx::database client = conn->database(std::string(DATABASENAME));
-        mongocxx::collection db = client[std::string(DBCACHENAME)];
 
-        mongocxx::options::find options;
-        options.sort( document{} << "mtime" << -1 << finalize);
-        auto cursor = db.find(
-                document{} << finalize,
-                options
-        );
-        auto toDelete = bsoncxx::builder::basic::array{};
-        uint_fast8_t nToDelete = 0;
-        for( auto doc: cursor){
-            std::string filename = std::string(doc["filename"].get_utf8().value);
-            int64_t size = doc["size"].get_int64().value;
+        std::string sql_select = "SELECT path,size,mtime FROM " DBCACHENAME " WHERE exists=true ORDER BY mtime ASC LIMIT 1000";
+        std::string sql_delete = "INSERT INTO " DBCACHENAME " (path,size,mtime, exists) VALUES ";
+        sql_delete.reserve(1024*1024*4);
+        db_handle_t db;
+        auto w = db.getWork();
+        auto results = w->exec(sql_select);
+        std::string now = std::to_string(time(nullptr));
+        bool needsUpdating = false;
+        for( auto row: results){
+            std::string filename = row[0].as<std::string>();
+            int64_t size = row[1].as<int64_t>();
             if( fs::exists(fs::path(filename))) {
                 if(unlink(filename.c_str()) == 0 )
                     workingSize -= size;
             }
-            toDelete.append(filename);
-            nToDelete++;
-
-            if(nToDelete == 100){
-                int64_t delta = workingSize-oldSize;
-                oldSize = incrementCacheSize(delta);
-                workingSize = oldSize;
-
-
-                nToDelete = 0;
-                db.delete_many(
-                        document{} << "filename" << open_document << "$in" << toDelete << close_document << finalize
-                );
-                toDelete = bsoncxx::builder::basic::array{};
-
+            if(needsUpdating){
+                sql_delete += ",";
+            }else{
+                needsUpdating=true;
             }
+            sql_delete += "('";
+            sql_delete += filename;
+            sql_delete += "',0,";
+            sql_delete += now;
+            sql_delete += ", true) ";
+
+
             if(workingSize < targetSize){
                 break;
             }
         }
 
-        if(nToDelete > 0) {
-            db.delete_many(
-                    document{} << "filename" << open_document << "$in" << toDelete << close_document << finalize
-            );
+        if(needsUpdating){
+            sql_delete +=  "ON CONFLICT (path) DO UPDATE SET "
+                           "exists=false";
+
+            w->exec(sql_delete);
+            w->commit();
         }
+
 
         int64_t delta = workingSize-oldSize;
         auto newSize = incrementCacheSize(delta);
         if(newSize > FileIO::maxCacheOnDisk){
             deleteFilesFromCacheOnDisk();
         }
-        */
+
 
     }
 
@@ -1093,74 +1100,66 @@ namespace DriveFS{
     }
 
     void FileIO::insertFileToCacheDatabase(fs::path path, size_t size){
-        mongocxx::pool::entry conn = m_account->pool.acquire();
-        mongocxx::database client = conn->database(std::string(DATABASENAME));
-        mongocxx::collection db = client[std::string(DBCACHENAME)];
-        mongocxx::options::update option;
-        option.upsert(true);
-
         db_handle_t db;
-
+        auto w = db.getWork();
 
         try {
-            db.update_one(
-                    document{} << "filename" << path.string() << finalize,
-                    document{} << "$set" << open_document << "filename" << path.string()
-                               << "size" << ((int64_t) size)
-                               << "mtime" << time(nullptr)
-                               << "exists" << true
-                               << close_document << finalize,
-                    option
+            const char * fmt = "INSERT INTO " DBCACHENAME "(path,size,mtime,exists) VALUES ('%s',%lu,%lu,true) "
+                    "ON CONFLICT (path) DO UPDATE SET "
+                    "size=EXCLUDED.size,"
+                    "exists=true,"
+                    "mtime=EXCLUDED.mtime";
+            std::string const sPath = path.string();
+            uint64_t now = time(nullptr);
+            int sz = std::snprintf(nullptr, 0, fmt, sPath.c_str(), size, now);
+            std::string sql;
+            sql.reserve(sz+1);
+            snprintf(sql.data(), sz+1, fmt, sPath.c_str(), size, now);
+            w->exec(sql);
+            w->commit();
 
-            );
         }catch(std::exception &e) {
             LOG(ERROR) << e.what();
-            insertFileToCacheDatabase(path, size);
         }
 
         incrementCacheSize(size);
     }
     void FileIO::insertFilesToCacheDatabase(const std::vector<fs::path> &paths, const std::vector<size_t> &sizes){
-#warning insertFilesToCacheDatabase
-        /*
-        mongocxx::pool::entry conn = m_account->pool.acquire();
-        mongocxx::database client = conn->database(std::string(DATABASENAME));
-        mongocxx::collection db = client[std::string(DBCACHENAME)];
-        mongocxx::options::update option;
-        option.upsert(true);
-        mongocxx::bulk_write documents;
-        size_t totalSize = 0;
-        bool needsWriting = false;
-        for(int i = 0; i < paths.size(); i++) {
-            needsWriting = true;
-            const auto & path = paths[i];
-            mongocxx::model::update_one upsert_op(
-                    document{} << "filename" << path.string() << finalize,
-                    document{} << "$set" << open_document
-                               << "filename" << path.string()
-                               << "size" << ((int64_t) sizes[i])
-                               << "mtime" << time(nullptr)
-                               << close_document  << finalize
-            );
-            upsert_op.upsert(true);
-            documents.append(upsert_op);
-            totalSize += sizes[i];
-            if( (i % 100) == 0){
-                db.bulk_write(documents);
-                needsWriting = false;
-                documents = mongocxx::bulk_write{};
-            }
+        db_handle_t db;
+        auto w = db.getWork();
+        std::string sql = "INSERT INTO " DBCACHENAME "(path,size,mtime,exists) VALUES ";
+        sql.reserve(512000);
 
+        size_t totalSize = 0;
+        std::string  now = std::to_string(time(nullptr));
+        for(int i = 0; i < paths.size(); i++) {
+            auto const & path = paths[i];
+
+            sql += "('";
+            sql += path.string();
+            sql += "',";
+            sql += std::to_string(sizes[i]);
+            sql += ",";
+            sql += now;
+            sql += ", true) ";
+
+            totalSize += sizes[i];
         }
+
+        sql += "ON CONFLICT (path) DO UPDATE SET "
+               "size=EXCLUDED.size,"
+               "exists=true,"
+               "mtime=EXCLUDED.mtime";
+
+
+        w->exec(sql);
+        w->commit();
 
         incrementCacheSize(totalSize);
 
-        if(needsWriting)
-            db.bulk_write(documents);
 
         LOG(INFO) << "Current size of cache is "
                   << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
-      */
 
     }
 
