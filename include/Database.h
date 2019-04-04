@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 #include <boost/lockfree/queue.hpp>
+#include <boost/lockfree/stack.hpp>
 #include <sstream>
 
 class db_handle_t {
@@ -31,7 +32,7 @@ private:
 private:
     class DatabasePool {
     public:
-        DatabasePool():m_freeCons(1){};
+        DatabasePool():m_freeCons(std::thread::hardware_concurrency()){};
 
         void setDatabase(const std::string &uri, uint32_t max);
 
@@ -48,7 +49,7 @@ private:
         uint32_t          initializeCons();
         pqxx::connection *getCon();
 
-        boost::lockfree::queue<pqxx::connection*> m_freeCons;
+        boost::lockfree::stack<pqxx::connection*> m_freeCons;
 
     };
     static DatabasePool pool;
