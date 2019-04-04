@@ -16,7 +16,7 @@ namespace DriveFS::FileManager{
         static boost::recursive_mutex  lruMutex;
         static std::vector<std::string> getParentsFromDB(std::string const &id){
             db_handle_t db;
-            auto w = db.getWork();
+            auto w = db.getTransaction();
             std::string sql;
             sql.reserve(512);
             snprintf(sql.data(), 512, "SELECT "
@@ -48,7 +48,7 @@ namespace DriveFS::FileManager{
 
         std::vector<GDriveObject> getChildren(std::string const &id){
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
         std::string sql;
         sql.reserve(512);
         snprintf(sql.data(), 512,
@@ -85,7 +85,7 @@ namespace DriveFS::FileManager{
 
     GDriveObject fromParentIdAndName(const std::string &id, char const* name, bool logSqlFailure){
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
         std::string sql;
         sql.reserve(512);
 
@@ -125,7 +125,7 @@ namespace DriveFS::FileManager{
         }
 
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
 
         std::string sql;
         sql.reserve(512);
@@ -145,7 +145,7 @@ namespace DriveFS::FileManager{
         }
 
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
         std::string sql;
         sql.reserve(512);
         snprintf(sql.data(),  512,
@@ -214,7 +214,7 @@ namespace DriveFS::FileManager{
         }
 
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
         std::string sql;
         sql.reserve(512);
         snprintf(sql.data(), 512,

@@ -21,14 +21,15 @@ public:
     db_handle_t(db_handle_t &&that);
     ~db_handle_t();
 
-    inline pqxx::work* getWork(){return w;}
+    pqxx::work* getWork();
+    pqxx::nontransaction* getTransaction();
     static void setDatabase(const std::string &uri, uint32_t max=std::thread::hardware_concurrency()){
         pool.setDatabase(uri, max);
     };
 private:
     inline pqxx::connection* getConnection(){return c;};
     pqxx::connection *c;
-    pqxx::work *w;
+    pqxx::transaction_base *w;
 private:
     class DatabasePool {
     public:

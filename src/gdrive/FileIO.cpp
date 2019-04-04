@@ -1014,10 +1014,11 @@ namespace DriveFS{
             bool needsUpdating = false;
             for( auto row: results){
                 std::string filename = row[0].as<std::string>();
-                int64_t size = row[1].as<int64_t>();
                 if( fs::exists(fs::path(filename))) {
-                    if(unlink(filename.c_str()) == 0 )
+                    if(unlink(filename.c_str()) == 0 ){
+                        int64_t size = row[1].as<int64_t>();
                         workingSize -= size;
+                    }
                 }
                 if(needsUpdating){
                     sql_delete += ",";
