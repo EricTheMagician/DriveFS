@@ -29,7 +29,8 @@ struct timespec getTimeFromRFC3339String(std::string_view str_date){
     date::sys_time<std::chrono::milliseconds> tp;
     std::stringstream ss;
     ss << str_date;
-    ss >> date::parse("%FT%TZ", tp);
+//    ss >> date::parse("%FT%TZ", tp);
+    ss >> date::parse("%F %T", tp);
     int64_t epoch = tp.time_since_epoch().count();
     return {epoch/1000, epoch % 1000};
 
