@@ -35,8 +35,8 @@ namespace DriveFS{
                 memset(&e, 0, sizeof(e));
                 e.attr = child->attribute;
                 e.ino = e.attr.st_ino;
-                e.attr_timeout = 18000.0;
-                e.entry_timeout = 18000.0;
+                e.attr_timeout = 15.0;
+                e.entry_timeout = 15.0;
                 e.generation = 1;
                 int reply_err = fuse_reply_entry(req, &e);
                 while(reply_err != 0){
@@ -167,8 +167,8 @@ namespace DriveFS{
         memset(&e, 0, sizeof(e));
         e.attr = folder->attribute;
         e.ino = e.attr.st_ino;
-        e.attr_timeout = 18000.0;
-        e.entry_timeout = 18000.0;
+        e.attr_timeout = 15.0;
+        e.entry_timeout = 15.0;
         folder->lookupCount.fetch_add(1, std::memory_order_relaxed);
         LOG(INFO) << "Mkdir with name " << name;
         int reply_err = fuse_reply_entry(req, &e);
@@ -626,11 +626,11 @@ namespace DriveFS{
 
     void releasedir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
         FolderIO *io = (FolderIO *) fi->fh;
-        delete io;
         int reply_err = fuse_reply_err(req, 0);
         while(reply_err != 0){
             reply_err = fuse_reply_err(req, 0);
         }
+        delete io;
     }
 
     void fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
@@ -837,8 +837,8 @@ namespace DriveFS{
         e.ino = child->attribute.st_ino;
         e.generation = 0; //child->attribute.;
         e.attr = child->attribute;
-        e.attr_timeout = 300;
-        e.entry_timeout = 300;
+        e.attr_timeout = 15;
+        e.entry_timeout = 15;
 
 //#if FUSE_USE_VERSION >= 30
 //        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
