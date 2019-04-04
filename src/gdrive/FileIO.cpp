@@ -85,7 +85,7 @@ void handleReplyData(fuse_req_t req, __no_collision_download__ *item, std::vecto
 namespace DriveFS{
     using FileManager::DownloadCache;
 
-    uint_fast32_t FileIO::write_buffer_size = 64*1024*1024, //64mb
+    uint_fast32_t FileIO::write_buffer_size = 32*1024*1024, //64mb
             FileIO::block_read_ahead_start = UINT32_MAX,
             FileIO::block_read_ahead_end = UINT32_MAX,
             FileIO::block_download_size=1024*1024*2;
@@ -372,7 +372,7 @@ namespace DriveFS{
         }();
 
         if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId)) )
-             && (item->buffer != nullptr || item->wait() )
+             && (item->buffer != nullptr || (item->wait() && item->buffer != nullptr) )
              && bufferMatchesExpectedBufferSize(item->buffer->size()) ) {
             handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
             repliedReq = !spillOver;
@@ -397,10 +397,11 @@ namespace DriveFS{
 
 //                if ((item = DownloadCache.get(chunkId)) || (item = getFromCache(chunkId)) ){
                 if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId)) )
-                     && (item->buffer != nullptr || item->wait() )
+                     && (item->buffer != nullptr || (item->wait() && item->buffer != nullptr) )
                      && bufferMatchesExpectedBufferSize(item->buffer->size()) ) {
                     assert((spillOverPrecopy + size2) <= buffer->size());
                     handleReplyData(req, item.get(), buffer, size2, 0, spillOver, &spillOverPrecopy);
+                    buffer = nullptr;
                     repliedReq = true;
                 }  else {
                     chunksToDownload.push_back(chunkNumber2);
@@ -493,6 +494,7 @@ namespace DriveFS{
                                                    }
                                                    std::atomic_thread_fence(std::memory_order_acquire);
                                                    strong_obj->event.signal();
+                                                   strong_obj.reset();
                                                }
                                            });
                     } else {
@@ -503,10 +505,10 @@ namespace DriveFS{
 
                                    if (strong_obj && strong_file) {
                                        FileIO::download(req, strong_file.get(), strong_obj.get(), cacheName2, start, start + chunkSize - 1, 0);
-                                       strong_file.reset();
-                                       strong_obj.reset();
-                                       return;
                                    }
+                                   strong_file.reset();
+                                   strong_obj.reset();
+
                                });
                         }
                 }
@@ -997,55 +999,58 @@ namespace DriveFS{
         int64_t workingSize = oldSize,
         targetSize = ((double)FileIO::maxCacheOnDisk) * 0.9;
 
-        LOG(INFO) << "Deleting files until target size is reached";
-        LOG(DEBUG) << "Target Size: " << targetSize;
-        LOG(DEBUG) << "Current Size: "  << oldSize;
-
         std::string sql_select = "SELECT path,size,mtime FROM " DBCACHENAME " WHERE exists=true ORDER BY mtime ASC LIMIT 1000";
         std::string sql_delete = "INSERT INTO " DBCACHENAME " (path,size,mtime, exists) VALUES ";
         sql_delete.reserve(1024*1024*4);
-        db_handle_t db;
-        auto w = db.getWork();
-        auto results = w->exec(sql_select);
-        std::string now = std::to_string(time(nullptr));
-        bool needsUpdating = false;
-        for( auto row: results){
-            std::string filename = row[0].as<std::string>();
-            int64_t size = row[1].as<int64_t>();
-            if( fs::exists(fs::path(filename))) {
-                if(unlink(filename.c_str()) == 0 )
-                    workingSize -= size;
+        while(oldSize > targetSize){
+            LOG(INFO)  << "Deleting files until target size is reached";
+            LOG(DEBUG) << "Target Size: " << targetSize;
+            LOG(DEBUG) << "Current Size: "  << oldSize;
+
+            db_handle_t db;
+            auto w = db.getWork();
+            auto results = w->exec(sql_select);
+            std::string now = std::to_string(time(nullptr));
+            bool needsUpdating = false;
+            for( auto row: results){
+                std::string filename = row[0].as<std::string>();
+                int64_t size = row[1].as<int64_t>();
+                if( fs::exists(fs::path(filename))) {
+                    if(unlink(filename.c_str()) == 0 )
+                        workingSize -= size;
+                }
+                if(needsUpdating){
+                    sql_delete += ",";
+                }else{
+                    needsUpdating=true;
+                }
+                sql_delete += "('";
+                sql_delete += filename;
+                sql_delete += "',0,";
+                sql_delete += now;
+                sql_delete += ", false) ";
+
+
+                if(workingSize < targetSize){
+                    break;
+                }
             }
+
             if(needsUpdating){
-                sql_delete += ",";
-            }else{
-                needsUpdating=true;
+                sql_delete +=  "ON CONFLICT (path) DO UPDATE SET "
+                               "exists=false";
+
+                try{
+                    w->exec(sql_delete);
+                    w->commit();
+                }catch(std::exception &e){
+                    LOG(ERROR) << e.what();
+                }
             }
-            sql_delete += "('";
-            sql_delete += filename;
-            sql_delete += "',0,";
-            sql_delete += now;
-            sql_delete += ", true) ";
 
 
-            if(workingSize < targetSize){
-                break;
-            }
-        }
-
-        if(needsUpdating){
-            sql_delete +=  "ON CONFLICT (path) DO UPDATE SET "
-                           "exists=false";
-
-            w->exec(sql_delete);
-            w->commit();
-        }
-
-
-        int64_t delta = workingSize-oldSize;
-        auto newSize = incrementCacheSize(delta);
-        if(newSize > FileIO::maxCacheOnDisk){
-            deleteFilesFromCacheOnDisk();
+            int64_t delta = workingSize-oldSize;
+            oldSize = incrementCacheSize(delta);
         }
 
 
