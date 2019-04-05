@@ -842,7 +842,7 @@ namespace DriveFS{
             [io = this, url]()->void{
 
                 while(!io->resumeFileUploadFromUrl(url));
-                delete io;
+                io->deleteObject();
             });
         }else{
             while(!resumeFileUploadFromUrl(url));

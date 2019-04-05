@@ -18,7 +18,7 @@ public:
         totalSize(256*nChildren),
         buffer(new std::vector<char>(256*nChildren)){
     }
-    ~FolderIO(){
+    ~FolderIO() override{
         delete buffer;
     }
 

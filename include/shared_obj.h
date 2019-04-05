@@ -11,6 +11,7 @@ public:
     void deleteObject(){
         intrusive_ptr_release(this);
     }
+    virtual ~shared_obj() = default;
 private:
     std::atomic_uint_fast8_t referenceCount_;
     friend void intrusive_ptr_add_ref(shared_obj * obj){

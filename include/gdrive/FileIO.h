@@ -55,7 +55,7 @@ namespace DriveFS {
         static int64_t maxCacheOnDisk;
         FileIO(GDriveObject object, int flag);
 
-        ~FileIO();
+        ~FileIO() override;
 
         void read(fuse_req_t req, const size_t &size, const off_t &off);
 
