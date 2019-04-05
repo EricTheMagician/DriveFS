@@ -20,35 +20,33 @@ namespace DriveFS{
     }
 
     void lookup(fuse_req_t req, fuse_ino_t parent_ino, const char *name){
-//        SFAsync([=] {
-            GDriveObject parent = FileManager::fromInode(parent_ino);
-            if(!parent){
-                int reply_err = fuse_reply_err(req, ENOENT);
-                while(reply_err != 0){
-                    reply_err = fuse_reply_err(req, ENOENT);
-                }
-                return;
-            }
-            GDriveObject child =FileManager::fromParentIdAndName(parent->getId(), name);
-            if(child){
-                struct fuse_entry_param e;
-                memset(&e, 0, sizeof(e));
-                e.attr = child->attribute;
-                e.ino = e.attr.st_ino;
-                e.attr_timeout = 15.0;
-                e.entry_timeout = 15.0;
-                e.generation = 1;
-                int reply_err = fuse_reply_entry(req, &e);
-                while(reply_err != 0){
-                    reply_err = fuse_reply_entry(req, &e);
-                }
-                return;
-            }
+        GDriveObject parent = FileManager::fromInode(parent_ino);
+        if(!parent){
             int reply_err = fuse_reply_err(req, ENOENT);
             while(reply_err != 0){
                 reply_err = fuse_reply_err(req, ENOENT);
             }
-//        });
+            return;
+        }
+        GDriveObject child =FileManager::fromParentIdAndName(parent->getId(), name);
+        if(child){
+            struct fuse_entry_param e;
+            memset(&e, 0, sizeof(e));
+            e.attr = child->attribute;
+            e.ino = e.attr.st_ino;
+            e.attr_timeout = 15.0;
+            e.entry_timeout = 15.0;
+            e.generation = 1;
+            int reply_err = fuse_reply_entry(req, &e);
+            while(reply_err != 0){
+                reply_err = fuse_reply_entry(req, &e);
+            }
+            return;
+        }
+        int reply_err = fuse_reply_err(req, ENOENT);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, ENOENT);
+        }
     }
 
     void forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup){
@@ -61,18 +59,18 @@ namespace DriveFS{
     }
 
     void getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-            GDriveObject object(FileManager::fromInode(ino));
-            if (object) {
-                int reply_err = fuse_reply_attr(req, &(object->attribute), 30.0);
-                while(reply_err != 0){
-                    reply_err = fuse_reply_attr(req, &(object->attribute), 30.0);
-                }
-                return;
-            }
-            int reply_err = fuse_reply_err(req, ENOENT);
+       GDriveObject object(FileManager::fromInode(ino));
+        if (object) {
+            int reply_err = fuse_reply_attr(req, &(object->attribute), 30.0);
             while(reply_err != 0){
-                reply_err = fuse_reply_err(req, ENOENT);
+                reply_err = fuse_reply_attr(req, &(object->attribute), 30.0);
             }
+            return;
+        }
+        int reply_err = fuse_reply_err(req, ENOENT);
+        while(reply_err != 0){
+            reply_err = fuse_reply_err(req, ENOENT);
+        }
     }
 
     void setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi){

@@ -6,9 +6,14 @@
 #include <boost/thread/recursive_mutex.hpp>
 #include <boost/thread/shared_mutex.hpp>
 
+
 namespace DriveFS::FileManager{
     boost::compute::detail::lru_cache<ino_t, GDriveObject> inodeToObject(1024);
     boost::compute::detail::lru_cache<std::string, GDriveObject> idToObject(1024);
+    void cleanUpOnExit(){
+        DriveFS::FileManager::inodeToObject.clear();
+        DriveFS::FileManager::idToObject.clear();
+    }
 
 
     PriorityCache DownloadCache(1,1);

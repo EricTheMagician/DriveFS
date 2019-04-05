@@ -10,6 +10,7 @@
 #include "gdrive/FileManager.h"
 #include "gdrive/Dedupe.h"
 #include <sstream>
+#include "Database.h"
 
 namespace po = boost::program_options;
 
@@ -297,6 +298,11 @@ int main(int argc, char **argv) {
     // struct fuse_lowlevel_ops ops = DriveFS::Filesystem::getOps();
     struct fuse_lowlevel_ops ops = DriveFS::getOps();   
 
+    // setup cleanup on exit
+    std::atexit( [](){
+        DriveFS::FileManager::cleanUpOnExit();
+        db_handle_t::cleanUpOnExit();
+    });
 #if FUSE_USE_VERSION >= 30
     struct fuse_cmdline_opts opts;
     if (fuse_parse_cmdline(&args, &opts) != 0)
@@ -365,6 +371,7 @@ err_out2:
 err_out1:
     fuse_opt_free_args(&args);
 
+    free(v);
     ucout << "Done." << std::endl;
 
     return 0;

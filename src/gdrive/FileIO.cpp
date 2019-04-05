@@ -915,13 +915,12 @@ namespace DriveFS{
         memset(&st, 0, sizeof(struct stat));
 
         bool needsUpdating = false;
-        uint8_t count = 0;
+        uint_fast8_t count = 0;
         sql.reserve(4200);
         std::string sql_insert;
-        sql_insert.reserve(1024*1024*4);
+        sql_insert.reserve(1024*1024*2);
         sql_insert += "INSERT INTO " DBCACHENAME "(path,size,mtime,exists) VALUES ";
-        bool needsToInsert = false;
-        for(fs::directory_entry& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {})) {
+        for(fs::directory_entry& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {})) {            
             if(fs::exists(entry)) {
                 fs::permissions(entry, fs::owner_all);
                 size_t size = fs::file_size(entry);;
@@ -955,7 +954,6 @@ namespace DriveFS{
                     else
                         needsUpdating = true;
 
-                    needsToInsert = true;
                     sql_insert += "('";
                     sql_insert += path.string();
                     sql_insert += "',";
@@ -965,10 +963,28 @@ namespace DriveFS{
                     sql_insert += ", true) ";
 
                 }
+                count++;
+                if(count % 200 == 0){
+                    count = 0;
+                    needsUpdating = false;
+                    sql_insert += "ON CONFLICT (path) DO UPDATE SET "
+                           "size=EXCLUDED.size,"
+                           "exists=true,"
+                           "mtime=EXCLUDED.mtime";
+                    try {
+                        w->exec(sql_insert);
+                    } catch (std::exception &e) {
+                        LOG(INFO) << sql_insert;
+                        LOG(FATAL) << e.what();
+                    }
+                    sql_insert.clear();
+                    sql_insert += "INSERT INTO " DBCACHENAME "(path,size,mtime,exists) VALUES ";
+
+                }
 
             }
         }
-        if(needsToInsert){
+        if(needsUpdating){
             sql_insert += "ON CONFLICT (path) DO UPDATE SET "
                    "size=EXCLUDED.size,"
                    "exists=true,"

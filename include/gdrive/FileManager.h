@@ -21,7 +21,7 @@ namespace DriveFS::FileManager{
     extern std::string asJSONForRename(ino_t inode);
     extern std::string asJSONForRename(GDriveObject const & obj);
     extern bool removeFileWithIDFromDB(std::string const &id);
-
+    extern void cleanUpOnExit();
 };
 
 #define APP_UID "driveFS_uid"

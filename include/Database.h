@@ -26,6 +26,9 @@ public:
     static void setDatabase(const std::string &uri, uint32_t max=std::thread::hardware_concurrency()){
         pool.setDatabase(uri, max);
     };
+    static void cleanUpOnExit(){
+        DatabasePool::cleanUpOnExit();
+    }
 private:
     inline pqxx::connection* getConnection(){return c;};
     pqxx::connection *c;
@@ -40,10 +43,14 @@ private:
 
         pqxx::connection* getConnection();
         void releaseConnection(pqxx::connection *c);
+        static void cleanUpOnExit(){
+            pqxx::connection* c;
+            while( pool.m_freeCons.pop(c) ){
+                delete c;
+            };
+        }
+
     private:
-
-
-        static std::vector<db_handle_t> pool_;  // Keep a static vector of pools,
 
         pqxx::connection *createCon();
         void              releaseCon(pqxx::connection *c);
