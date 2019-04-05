@@ -319,23 +319,27 @@ namespace DriveFS{
         }
 
         auto filesize = fs::file_size(path);
-        __no_collision_download__ item;
-        item.buffer = new std::vector<uint8_t>(filesize,0);
+        auto item = std::make_shared<__no_collision_download__>();
+        auto item2 = FileManager::DownloadCache.insert(chunkName, item);
+        if( item != item2){
+            item2->wait();
+            return item2;
+        }
+        item->buffer = new std::vector<uint8_t>(filesize,0);
         FILE *fp = fopen(path.string().c_str(), "rb");
         if (fp == nullptr) {
             return nullptr;
         }
-        auto read_size = fread( reinterpret_cast<char*>(item.buffer->data()), sizeof(unsigned char), filesize, fp);
+        auto read_size = fread( reinterpret_cast<char*>(item->buffer->data()), sizeof(unsigned char), filesize, fp);
         fclose(fp);
 
         if(!bufferMatchesExpectedBufferSize(read_size))
             return nullptr;
 
         // copy data
-        item.event.signal();
-        item.event.signal();
-        DownloadItem shared = std::make_shared<__no_collision_download__>(std::move(item));
-        return FileManager::DownloadCache.insert(chunkName, shared);
+
+        item->event.signal();
+        return item;
 
     }
 
