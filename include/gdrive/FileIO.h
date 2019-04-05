@@ -87,6 +87,7 @@ namespace DriveFS {
         bool bufferMatchesExpectedBufferSize(const size_t &bufferSize);
 
         static void checkCacheSize();
+        static bool finishedInitialCheck;
         static int64_t incrementCacheSize(int64_t size);
         static void insertFileToCacheDatabase(fs::path path, size_t size);
         static void insertFilesToCacheDatabase(const std::vector<fs::path> &paths, const std::vector<size_t> &size);

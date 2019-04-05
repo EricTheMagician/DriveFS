@@ -26,6 +26,8 @@
 
 #define INVALID_CACHE_DELETED 4
 
+
+
 static std::mutex deleteCacheMutex;
 #define DBCACHENAME "CacheDB"
 using namespace web::http::client;          // HTTP client features
@@ -84,6 +86,7 @@ void handleReplyData(fuse_req_t req, __no_collision_download__ *item, std::vecto
 
 namespace DriveFS{
     using FileManager::DownloadCache;
+    bool FileIO::finishedInitialCheck = false;
 
     uint_fast32_t FileIO::write_buffer_size = 32*1024*1024, //64mb
             FileIO::block_read_ahead_start = UINT32_MAX,
@@ -937,7 +940,7 @@ namespace DriveFS{
                             sql_insert += ",";
                         else
                             needsUpdating = true;
-                        needsToInsert = true;
+
                         sql_insert += "('";
                         sql_insert += path.string();
                         sql_insert += "',";
@@ -980,6 +983,7 @@ namespace DriveFS{
         sql = "DELETE FROM " DBCACHENAME " WHERE exists=false";
         w->exec(sql);
         w->commit();
+        FileIO::finishedInitialCheck = true;
         incrementCacheSize(increment_size);
 
     }
@@ -1002,14 +1006,19 @@ namespace DriveFS{
     }
 
     void FileIO::deleteFilesFromCacheOnDisk(){
+        if(!FileIO::finishedInitialCheck){
+            return;
+        }
         int64_t oldSize = FileIO::cacheSize.load(std::memory_order_relaxed);
         int64_t workingSize = oldSize,
         targetSize = ((double)FileIO::maxCacheOnDisk) * 0.9;
 
         std::string sql_select = "SELECT path,size,mtime FROM " DBCACHENAME " WHERE exists=true ORDER BY mtime ASC LIMIT 1000";
-        std::string sql_delete = "INSERT INTO " DBCACHENAME " (path,size,mtime, exists) VALUES ";
-        sql_delete.reserve(1024*1024*4);
+
         while(oldSize > targetSize){
+            std::string sql_delete = "INSERT INTO " DBCACHENAME " (path,size,mtime, exists) VALUES ";
+            sql_delete.reserve(1024*1024*4);
+
             LOG(INFO)  << "Deleting files until target size is reached";
             LOG(DEBUG) << "Target Size: " << targetSize;
             LOG(DEBUG) << "Current Size: "  << oldSize;
@@ -1019,6 +1028,9 @@ namespace DriveFS{
             auto results = w->exec(sql_select);
             std::string now = std::to_string(time(nullptr));
             bool needsUpdating = false;
+            if(results.size() == 0){
+                break;
+            }
             for( auto row: results){
                 std::string filename = row[0].as<std::string>();
                 if( fs::exists(fs::path(filename))) {
@@ -1059,6 +1071,7 @@ namespace DriveFS{
 
             int64_t delta = workingSize-oldSize;
             oldSize = incrementCacheSize(delta);
+            workingSize = workingSize;
         }
 
 
