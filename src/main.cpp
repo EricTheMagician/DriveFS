@@ -269,6 +269,11 @@ int main(int argc, char **argv) {
         fuse_args.push_back("default_permissions");
     }
 
+    if (vm.count("fuse-singlethread")) {
+        LOG(TRACE) << "will run fuse in single thread";
+        fuse_args.push_back("-s");
+    }
+
     fuse_args.push_back("-o");
     fuse_args.push_back("noatime");
 
