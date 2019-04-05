@@ -338,7 +338,11 @@ namespace DriveFS{
 
     void FileIO::getFromCloud(fuse_req_t req, const size_t &_size, const off_t &off){
 
-        assert(_size < 1024*1024);
+        size_t filesize = m_file->attribute.st_size;
+        if( off > filesize || _size  > filesize ){
+            fuse_reply_err(req, EIO);
+            return;
+        }
 
         const uint64_t chunkNumber = getChunkNumber(off, block_download_size);
         const uint64_t chunkStart = getChunkStart(off, block_download_size);
@@ -902,7 +906,7 @@ namespace DriveFS{
         std::string sql = "UPDATE " DBCACHENAME " SET exists=false";
         w->exec(sql);
 
-        size_t size;
+        size_t increment_size=0;
         time_t mtime;
         struct stat st;
         memset(&st, 0, sizeof(struct stat));
@@ -917,8 +921,8 @@ namespace DriveFS{
         for(fs::directory_entry& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {})) {
             if(fs::exists(entry)) {
                 fs::permissions(entry, fs::owner_all);
-                size = fs::file_size(entry);
-                incrementCacheSize(size);
+                size_t size = fs::file_size(entry);;
+                increment_size += size;
                 auto path = entry.path();
                 stat(path.string().c_str(), &st);
 
@@ -976,6 +980,7 @@ namespace DriveFS{
         sql = "DELETE FROM " DBCACHENAME " WHERE exists=false";
         w->exec(sql);
         w->commit();
+        incrementCacheSize(increment_size);
 
     }
 
