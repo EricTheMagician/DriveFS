@@ -322,6 +322,7 @@ int main(int argc, char **argv) {
     {
         fuse_session_loop_mt(account.fuse_session, 1);
     }
+    fuse_session_unmount(account.fuse_session);
 
 #else
     char *mountpoint;
@@ -353,25 +354,17 @@ int main(int argc, char **argv) {
         fuse_session_loop_mt(account.fuse_session);
     else
         fuse_session_loop(account.fuse_session);
-
-#endif
-
-    fuse_remove_signal_handlers(account.fuse_session);
-    fuse_session_destroy(account.fuse_session);
-#if FUSE_USE_VERSION >= 30
-    fuse_session_unmount(account.fuse_session);
-#else
     fuse_unmount(mountpoint, account.fuse_channel);
+
 #endif
+
 err_out3:
     fuse_remove_signal_handlers(account.fuse_session);
-    err_out2:
+err_out2:
     fuse_session_destroy(account.fuse_session);
-    err_out1:
-#ifndef USE_FUSE3
-    fuse_unmount(mountpoint, account.fuse_channel);
-#endif
+err_out1:
     fuse_opt_free_args(&args);
+
     ucout << "Done." << std::endl;
 
     return 0;
