@@ -6,10 +6,13 @@
 #include <vector>
 #include <cstdint>
 #include "BaseFileSystem.h"
+#include "shared_obj.h"
 
-class FolderIO {
+class FolderIO: public shared_obj {
 
 public:
+    typedef boost::intrusive_ptr<FolderIO> shared_ptr;
+
     FolderIO(fuse_req_t _req, uint64_t nChildren):
         req(_req),
         totalSize(256*nChildren),

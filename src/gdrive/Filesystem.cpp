@@ -387,8 +387,8 @@ namespace DriveFS{
                 return;
             }
 
-            FileIO *io = new FileIO(object, fi->flags);
-            fi->fh = (uintptr_t) io;
+            FileIO::shared_ptr io = new FileIO(object, fi->flags);
+            fi->fh = (uintptr_t) io.get();
 
             int reply_err = fuse_reply_open(req, fi);
             while(reply_err != 0){
@@ -405,15 +405,15 @@ namespace DriveFS{
     }
 
     void read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
-        FileIO *io = (FileIO *) fi->fh;
-        if (io == nullptr) {
-            LOG(ERROR) << "io was null when reading file";
-            int reply_err = fuse_reply_err(req, EIO);
-            while(reply_err != 0){
-                reply_err = fuse_reply_err(req, EIO);
-            }
-            return;
-        }
+        FileIO::shared_ptr io = (FileIO *) fi->fh;
+//        if (io == nullptr) {
+//            LOG(ERROR) << "io was null when reading file";
+//            int reply_err = fuse_reply_err(req, EIO);
+//            while(reply_err != 0){
+//                reply_err = fuse_reply_err(req, EIO);
+//            }
+//            return;
+//        }
 
         VLOG(10) << "Reading size " << size << " with off " << off << " and "
                  << ((size + off <= io->m_file->getFileSize()) ? "<=" : ">");
@@ -428,7 +428,7 @@ namespace DriveFS{
 
     void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi){
         GDriveObject object = FileManager::fromInode(ino);
-        if(object == nullptr){
+        if(!object){
             int reply_err = fuse_reply_err(req, ENOENT);
             while(reply_err != 0){
                 reply_err = fuse_reply_err(req, ENOENT);
@@ -437,7 +437,7 @@ namespace DriveFS{
         }
 
 //    SFAsync([req, off,buf,size,fi] {
-        FileIO *io = (FileIO *) fi->fh;
+        FileIO::shared_ptr io = (FileIO *) fi->fh;
 
        if(!(io->m_file)){
             int reply_err = fuse_reply_err(req, EAGAIN);
@@ -574,7 +574,7 @@ namespace DriveFS{
                     io->upload(true);
                 }
             }else{
-                delete io;
+                io->deleteObject();
                 fi->fh = 0;
             }
 
@@ -595,14 +595,14 @@ namespace DriveFS{
         _lockObject test { object.get() };
         std::vector<GDriveObject> children = FileManager::getChildren(object->getId());
 
-        FolderIO *io = new FolderIO(req, children.size());
+        FolderIO::shared_ptr io = new FolderIO(req, children.size());
         for (auto const &child: children) {
             if(child->getIsTrashed())
                 continue;
             io->addDirEntry(child->getName().c_str(), child->attribute);
         }
         io->done();
-        fi->fh = (uintptr_t) io;
+        fi->fh = (uintptr_t) io.get();
 
 
         int reply_err = fuse_reply_open(req, fi);
@@ -612,16 +612,16 @@ namespace DriveFS{
     }
 
     void readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
-        FolderIO *io = (FolderIO*)(fi->fh);
-        if(io!= nullptr) {
+        FolderIO::shared_ptr io = (FolderIO*)(fi->fh);
+//        if(io!= nullptr) {
             reply_buf_limited(req, io->buffer->data(), io->accumulated_size,off,size);
-        }else{
-            LOG(ERROR) << "When readding dir, the fi->fh was nullptr";
-            int reply_err = fuse_reply_err(req, EIO);
-            while(reply_err != 0){
-                reply_err = fuse_reply_err(req, EIO);
-            }
-        }
+            return;
+//        }
+//        LOG(ERROR) << "When readding dir, the fi->fh was nullptr";
+//        int reply_err = fuse_reply_err(req, EIO);
+//        while(reply_err != 0){
+//            reply_err = fuse_reply_err(req, EIO);
+//        }
     }
 
     void releasedir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
@@ -630,7 +630,7 @@ namespace DriveFS{
         while(reply_err != 0){
             reply_err = fuse_reply_err(req, 0);
         }
-        delete io;
+        io->deleteObject();
     }
 
     void fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);

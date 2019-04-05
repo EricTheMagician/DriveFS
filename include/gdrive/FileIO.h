@@ -26,6 +26,8 @@
 #include <autoresetevent.h>
 #include <boost/filesystem.hpp>
 #include <utility>
+#include <boost/intrusive_ptr.hpp>
+#include "shared_obj.h"
 
 namespace fs = boost::filesystem;
 using DownloadResult = std::pair<web::http::http_response, uint_fast8_t>;
@@ -40,9 +42,10 @@ namespace DriveFS {
     void setMaxConcurrentDownload(int n);
     void setMaxConcurrentUpload(int n);
 
-    class FileIO {
+    class FileIO: public shared_obj {
 
     public:
+        typedef boost::intrusive_ptr<FileIO> shared_ptr;
         static uint_fast32_t write_buffer_size, // the size of the buffer before writing to disk
                 block_download_size, // size of the download chunk
                 block_read_ahead_start, block_read_ahead_end; // boundaries to download extra blocks ahead of time
@@ -116,7 +119,8 @@ namespace DriveFS {
         off_t last_write_to_buffer, first_write_to_buffer;
         AutoResetEvent m_event;
         int m_fd=-1;
-        FILE* m_fp;
+        FILE* m_fp;        
+
 
         static bool renameOldCacheFile(const char* oldName, const char* newName);
         static void deleteFileFromUploadCache(const std::string &id);

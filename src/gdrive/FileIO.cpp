@@ -101,7 +101,7 @@ namespace DriveFS{
     fs::path FileIO::downloadPath = "/tmp/DriveFS/download";
     fs::path FileIO::uploadPath = "/tmp/DriveFS/upload";
 
-    FileIO::FileIO(GDriveObject object, int flag):
+    FileIO::FileIO(GDriveObject object, int flag): shared_obj(),
             m_file(std::move(object)),
             b_is_uploading(false),
             b_is_cached(false),
@@ -337,6 +337,8 @@ namespace DriveFS{
     }
 
     void FileIO::getFromCloud(fuse_req_t req, const size_t &_size, const off_t &off){
+
+        assert(_size < 1024*1024);
 
         const uint64_t chunkNumber = getChunkNumber(off, block_download_size);
         const uint64_t chunkStart = getChunkStart(off, block_download_size);
@@ -626,7 +628,7 @@ namespace DriveFS{
                        }
 
 
-                       delete io;
+                       io->deleteObject();
                    });
         }else{
             _upload();
