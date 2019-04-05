@@ -24,8 +24,7 @@ struct __no_collision_download__{
 
     __no_collision_download__(): buffer(nullptr)
     {
-////        created++;
-//        LOG(INFO) << (created++) + 1<< " collision downloads created available";
+//        LOG(INFO) << "collision downloads created " << (uintptr_t) this;
     }
 
 //    __no_collision_download__(__no_collision_download__ &that){
@@ -36,6 +35,7 @@ struct __no_collision_download__{
 //        this->isInvalid  = that.isInvalid;
 //        LOG(INFO) << (created++) + 1<< " collision downloads copied";
 //    }
+    __no_collision_download__(__no_collision_download__ &) = delete;
     __no_collision_download__(__no_collision_download__ &&that){
         this->buffer = that.buffer;
         that.buffer = nullptr;
@@ -45,6 +45,8 @@ struct __no_collision_download__{
         if(buffer != nullptr){
             delete buffer;
         }
+//        LOG(INFO) << "deleting collision downloads created " << (uintptr_t) this;
+
     }
     std::vector<unsigned char>* buffer;
     AutoResetEvent event;

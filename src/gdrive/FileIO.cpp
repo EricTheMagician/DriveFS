@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstdint>
 #include <inttypes.h>
+#include <cpprest/rawptrstream.h>
 
 #if FUSE_USE_VERSION >= 30
 #include <fuse3/fuse.h>
@@ -179,6 +180,28 @@ namespace DriveFS{
             LOG(ERROR) << "While downloading a file, file was null for " << cacheName << " ("<<start <<", " << end << ")";
             return false;
         }
+
+        struct VecBuffer{
+
+            /*
+             * RAII struct for deleting the buffer if it wasn't used
+             */
+            VecBuffer(size_t size): buffer(new std::vector<uint8_t>(size)){}
+            std::vector<uint8_t> *buffer;
+            void deleteBuffer(){
+                if(buffer!= nullptr)
+                    delete buffer;
+                buffer = nullptr;
+            }
+            ~VecBuffer(){
+                if(buffer != nullptr)
+                    delete buffer;
+            }
+        };
+
+        VecBuffer vecBuffer(end-start+1);
+//        Concurrency::streams::container_buffer<std::vector<uint8_t>> buf;
+        Concurrency::streams::rawptr_buffer<uint8_t> buf(vecBuffer.buffer->data(),vecBuffer.buffer->size());
         m_account->refresh_token();
         VLOG(9) << "Downloading " << file->getName() <<"\t" << start;
         http_client client = m_account->getClient(30); // timeout after 30s
@@ -194,6 +217,7 @@ namespace DriveFS{
 
         req.set_method(methods::GET);
         req.set_request_uri(builder.to_uri());
+        req.set_response_stream(buf);
         headers.add("Range", range);
 
         VLOG(9) << req.headers()["Range"];
@@ -212,6 +236,7 @@ namespace DriveFS{
             const unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
             sleep(sleep_time);
+            vecBuffer.deleteBuffer();
             return FileIO::download(fuseReq,  file, cache, std::move(cacheName), start, end, backoff);
         };
 
@@ -241,7 +266,10 @@ namespace DriveFS{
          }
 
         try {
-            cache->buffer = new std::vector<uint8_t>(resp.extract_vector().get());
+            resp.content_ready().get();
+            buf.close().get();
+            std::swap(cache->buffer,vecBuffer.buffer);
+
         }catch(std::exception &e){
             LOG(ERROR) << "There was an error while reading downloaded chunk: " << e.what();
             LOG(DEBUG) << "Chunk-range" << start << " - " << end;
@@ -251,6 +279,7 @@ namespace DriveFS{
             }
             LOG(DEBUG) << "Url " << builder.to_string();
             LOG(INFO) << "Retrying";
+            vecBuffer.deleteBuffer();
             return FileIO::download(fuseReq, file, cache, std::move(cacheName), start, end, backoff);
         }
         std::atomic_thread_fence(std::memory_order_release);
