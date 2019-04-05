@@ -98,15 +98,18 @@ find_package(PkgConfig REQUIRED)
 
 if(USE_FUSE3)
     MESSAGE("Using fuse3")
-    pkg_search_module(LIBFUSE REQUIRED fuse3)
+    pkg_search_module(LIBFUSE3 REQUIRED fuse3)
     target_compile_definitions(${PROJECT_NAME} PUBLIC USE_FUSE3
             FUSE_USE_VERSION=31)
-
+        target_include_directories(${PROJECT_NAME} PUBLIC         ${LIBFUSE3_INCLUDE_DIRS} )
+        set(FUSE_LIBRARIES ${LIBFUSE3_LIBRARIES})
 else()
     MESSAGE("Using fuse2")
     pkg_search_module(LIBFUSE REQUIRED fuse)
     target_compile_definitions(${PROJECT_NAME} PUBLIC
             FUSE_USE_VERSION=29)
+        set(FUSE_LIBRARIES ${LIBFUSE_LIBRARIES})
+        target_include_directories(${PROJECT_NAME} PUBLIC         ${LIBFUSE_INCLUDE_DIRS} )
 endif()
 
 #add search for libbson
@@ -120,7 +123,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         ./external/adaptive_time_parser
         ./external/semaphore/common
         ./external/easyloggingpp/src
-        ${LIBFUSE_INCLUDE_DIRS}
 #        ${CMAKE_BINARY_DIR}/include
         )
 
@@ -142,9 +144,9 @@ conan_basic_setup(TARGETS)
 MESSAGE("fuse libraries are: ${LIBFUSE_LIBRARIES}")
 
 target_link_libraries(${PROJECT_NAME}
+        ${FUSE_LIBRARIES}
         CONAN_PKG::jemalloc
         pthread_nonshared.a
-        ${LIBFUSE_LIBRARIES}
         CONAN_PKG::boost
         CONAN_PKG::OpenSSL
         CONAN_PKG::cpprestsdk
