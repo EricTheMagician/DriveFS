@@ -29,6 +29,7 @@ namespace DriveFS::FileManager{
                    " FROM " DATABASEDATA 
                    " WHERE trashed=false AND id='%s'", id.c_str());
             pqxx::result sql_results = w->exec(sql);
+            w->commit();
 
             std::vector<std::string> results;
             if(sql_results.size() > 0) {
@@ -51,7 +52,7 @@ namespace DriveFS::FileManager{
     };
 
 
-        std::vector<GDriveObject> getChildren(std::string const &id){
+    std::vector<GDriveObject> getChildren(std::string const &id){
         db_handle_t db;
         auto w = db.getWork();
         std::string sql;
@@ -64,6 +65,7 @@ namespace DriveFS::FileManager{
                  w->esc(id).c_str()
                  );
         pqxx::result result = w->exec(sql);
+        w->commit();
         std::vector<GDriveObject> results;
         results.reserve(result.size());
         for(const pqxx::row &row: result){
@@ -99,6 +101,7 @@ namespace DriveFS::FileManager{
         try {
             pqxx::row result = w->exec1(sql);
             ino_t inode = result[0].as<ino_t>();
+            w->commit();
             return fromInode(inode);
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << "unable to find inode for parent_id " << id
@@ -137,6 +140,7 @@ namespace DriveFS::FileManager{
         snprintf(sql.data(), 512, "SELECT 1 FROM " DATABASEDATA " WHERE id='%s'",  w->esc(id).c_str());
 
         pqxx::result result = w->exec(sql);
+        w->commit();
         return result.size() > 0;
 
     }
@@ -174,6 +178,7 @@ namespace DriveFS::FileManager{
 
         try{
             result = w->exec1(sql);
+            w->commit();
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << e.what();
             LOG(ERROR) << "unable to get object for id " << id;
@@ -242,6 +247,7 @@ namespace DriveFS::FileManager{
         pqxx::row result {};
         try{
             result = w->exec1(sql);
+            w->commit();
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << e.what();
             LOG(ERROR) << "unable to get object for inode " << inode;
