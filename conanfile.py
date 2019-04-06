@@ -18,7 +18,7 @@ class DriveFSConan(ConanFile):
     generators = "cmake"
     default_options = {"jemalloc:shared": True, "OpenSSL:shared": True, "boost:shared": True,
             "cpprestsdk:shared": True,
-            "libpqxx:shared": True
+            "libpqxx:shared": False
     }
     build_policy = "missing"
 

@@ -235,8 +235,8 @@ namespace DriveFS{
             LOG(DEBUG) << "Url " << builder.to_string();
             const unsigned int sleep_time = std::pow(2, backoff);
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
-            sleep(sleep_time);
             vecBuffer.deleteBuffer();
+            sleep(sleep_time);
             return FileIO::download(fuseReq,  file, cache, std::move(cacheName), start, end, backoff);
         };
 
@@ -252,7 +252,7 @@ namespace DriveFS{
             LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
             try {
                 if(resp.status_code() < 500) {
-                    LOG(ERROR) << resp.extract_json(true).get();
+                    LOG(ERROR) << reinterpret_cast<const char *>(vecBuffer.buffer->data());
                 }else{
                     LOG(ERROR) << "status code is "<< resp.status_code();
                 }
@@ -260,15 +260,19 @@ namespace DriveFS{
                 LOG(ERROR) << e.what() << " - " << resp.status_code();
             };
             const unsigned int sleep_time = std::pow(2, backoff);
+            vecBuffer.deleteBuffer();
             LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
-            sleep(sleep_time);
-            return download(fuseReq, file, cache, std::move(cacheName), start, end, backoff + 1);
+            sleep(sleep_time);            
+            return FileIO::download(fuseReq, file, cache, std::move(cacheName), start, end, backoff + 1);
          }
 
         try {
             resp.content_ready().get();
+            auto size = buf.size();
+            if(size == (end-start+1)){
+                std::swap(cache->buffer,vecBuffer.buffer);
+            }
             buf.close().get();
-            std::swap(cache->buffer,vecBuffer.buffer);
 
         }catch(std::exception &e){
             LOG(ERROR) << "There was an error while reading downloaded chunk: " << e.what();
@@ -365,8 +369,7 @@ namespace DriveFS{
         if(!bufferMatchesExpectedBufferSize(read_size))
             return nullptr;
 
-        // copy data
-
+        item->event.signal();
         item->event.signal();
         return item;
 

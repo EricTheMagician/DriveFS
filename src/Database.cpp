@@ -1,22 +1,25 @@
 #include "Database.h"
 #include <unistd.h>
 db_handle_t::DatabasePool db_handle_t::pool{};
-db_handle_t::db_handle_t(): c(pool.getConnection()), w(nullptr){
+db_handle_t::db_handle_t(): c(pool.getConnection()), w(new pqxx::work(*c)){
 };
 
 //db_handle_t::db_handle_t(db_handle_t const  & that ){
 //
 //}
 pqxx::work* db_handle_t::getWork(){
-    if(w != nullptr){
-        return dynamic_cast<pqxx::work*>(w);
-    }
+//    if(w != nullptr){
+//        return dynamic_cast<pqxx::work*>(w);
+//    }
 
-    w = new pqxx::work(*c);
+//    w = new pqxx::work(*c);
 
-    return dynamic_cast<pqxx::work*>(w);
+//    return dynamic_cast<pqxx::work*>(w);
+    return w;
 }
 
+
+/*
 pqxx::nontransaction* db_handle_t::getTransaction(){
     if(w != nullptr){
         return dynamic_cast<pqxx::nontransaction*>(w);
@@ -27,6 +30,8 @@ pqxx::nontransaction* db_handle_t::getTransaction(){
     return dynamic_cast<pqxx::nontransaction*>(w);
 
 }
+*/
+
 db_handle_t::db_handle_t(db_handle_t &&that):
     c(that.c), w(that.w)
 {

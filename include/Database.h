@@ -22,7 +22,7 @@ public:
     ~db_handle_t();
 
     pqxx::work* getWork();
-    pqxx::nontransaction* getTransaction();
+//    pqxx::nontransaction* getTransaction();
     static void setDatabase(const std::string &uri, uint32_t max=std::thread::hardware_concurrency()){
         pool.setDatabase(uri, max);
     };
@@ -32,7 +32,8 @@ public:
 private:
     inline pqxx::connection* getConnection(){return c;};
     pqxx::connection *c;
-    pqxx::transaction_base *w;
+//    pqxx::transaction_base *w;
+    pqxx::work *w;
 private:
     class DatabasePool {
     public:
