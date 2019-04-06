@@ -175,7 +175,7 @@ namespace DriveFS{
 
     }
 
-    bool FileIO::download(fuse_req_t fuseReq, _Object* file, __no_collision_download__ *cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff) {
+    bool FileIO::download(fuse_req_t fuseReq, _Object* file, __no_collision_download__ *cache, std::string cacheName, uint64_t start, uint64_t end) {
         if(!file){
             LOG(ERROR) << "While downloading a file, file was null for " << cacheName << " ("<<start <<", " << end << ")";
             return false;
@@ -199,128 +199,132 @@ namespace DriveFS{
             }
         };
 
+        uint_fast8_t backoff = 0;
         VecBuffer vecBuffer(end-start+1);
-//        Concurrency::streams::container_buffer<std::vector<uint8_t>> buf;
-        Concurrency::streams::rawptr_buffer<uint8_t> buf(vecBuffer.buffer->data(),vecBuffer.buffer->size());
-        m_account->refresh_token();
-        VLOG(9) << "Downloading " << file->getName() <<"\t" << start;
-        http_client client = m_account->getClient(30); // timeout after 30s
         uri_builder builder( std::string("files/") +  file->getId());
         builder.append_query("alt", "media");
-//        builder.append_query("acknowledgeAbuse", "true");
         builder.append_query("supportsTeamDrives", "true");
-
-        http_request req;
-        auto &headers = req.headers();
         char range[100];
         snprintf( range, 100, "bytes=%lu-%lu", start, end);
 
-        req.set_method(methods::GET);
-        req.set_request_uri(builder.to_uri());
-        req.set_response_stream(buf);
-        headers.add("Range", range);
+        while( backoff < 7 ){
+            VLOG(9) << "Downloading " << file->getName() <<"\t" << start;
+            Concurrency::streams::rawptr_buffer<uint8_t> buf(vecBuffer.buffer->data(),vecBuffer.buffer->size());
+            m_account->refresh_token();
+            http_client client = m_account->getClient(30); // timeout after 30s
 
-        VLOG(9) << req.headers()["Range"];
+            http_request req;
+            auto &headers = req.headers();
 
-        http_response resp;
-        try {
-            resp = client.request(req).get();
-        }catch(std::exception &e){
-            LOG(ERROR) << "There was an error while trying to download chunk: " << e.what();
-            LOG(DEBUG) << "Chunk-range" << start << " - " << end;
-            if(file) {
-                LOG(DEBUG) << "File ID " << file->getId();
-                LOG(DEBUG) << "File Size " << file->getFileSize();
-            }
-            LOG(DEBUG) << "Url " << builder.to_string();
-            const unsigned int sleep_time = std::pow(2, backoff);
-            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
-            vecBuffer.deleteBuffer();
-            sleep(sleep_time);
-            return FileIO::download(fuseReq,  file, cache, std::move(cacheName), start, end, backoff);
-        };
+            req.set_method(methods::GET);
+            req.set_request_uri(builder.to_uri());
+            req.set_response_stream(buf);
+            headers.add("Range", range);
 
-        if(resp.status_code() == 404){
-            LOG(ERROR) << "Giving up for id " << file->getId();
-            fuse_reply_err(fuseReq, ENOENT);
-            DownloadCache.remove(cacheName);
-            cache->event.signal();
-            return false;
-        }
+            VLOG(9) << req.headers()["Range"];
 
-        if(resp.status_code() != 206 && resp.status_code() != 200){
-            LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
+            http_response resp;
             try {
-                if(resp.status_code() < 500) {
-                    LOG(ERROR) << reinterpret_cast<const char *>(vecBuffer.buffer->data());
-                }else{
-                    LOG(ERROR) << "status code is "<< resp.status_code();
-                }
+                resp = client.request(req).get();
             }catch(std::exception &e){
-                LOG(ERROR) << e.what() << " - " << resp.status_code();
+                LOG(ERROR) << "There was an error while trying to download chunk: " << e.what();
+                LOG(DEBUG) << "Chunk-range" << start << " - " << end;
+                if(file) {
+                    LOG(DEBUG) << "File ID " << file->getId();
+                    LOG(DEBUG) << "File Size " << file->getFileSize();
+                }
+                LOG(DEBUG) << "Url " << builder.to_string();
+                const unsigned int sleep_time = std::pow(2, backoff++);
+                LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+                sleep(sleep_time);
+                continue;
             };
-            const unsigned int sleep_time = std::pow(2, backoff);
-            vecBuffer.deleteBuffer();
-            LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
-            sleep(sleep_time);            
-            return FileIO::download(fuseReq, file, cache, std::move(cacheName), start, end, backoff + 1);
-         }
 
-        try {
-            resp.content_ready().get();
-            auto size = buf.size();
-            if(size == (end-start+1)){
-                std::swap(cache->buffer,vecBuffer.buffer);
+            if(resp.status_code() == 404){
+                LOG(ERROR) << "Giving up for id " << file->getId();
+                fuse_reply_err(fuseReq, ENOENT);
+                DownloadCache.remove(cacheName);
+                cache->event.signal();
+                return false;
             }
-            buf.close().get();
 
-        }catch(std::exception &e){
-            LOG(ERROR) << "There was an error while reading downloaded chunk: " << e.what();
-            LOG(DEBUG) << "Chunk-range" << start << " - " << end;
-            if(file) {
-                LOG(DEBUG) << "File ID " << file->getId();
-                LOG(DEBUG) << "File Size " << file->getFileSize();
+            if(resp.status_code() != 206 && resp.status_code() != 200){
+                LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
+                try {
+                    if(resp.status_code() < 500) {
+                        LOG(ERROR) << reinterpret_cast<const char *>(vecBuffer.buffer->data());
+                    }else{
+                        LOG(ERROR) << "status code is "<< resp.status_code();
+                    }
+                }catch(std::exception &e){
+                    LOG(ERROR) << e.what() << " - " << resp.status_code();
+                };
+                const unsigned int sleep_time = std::pow(2, backoff++);
+                LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
+                sleep(sleep_time);
+                continue;
+             }
+
+            try {
+                resp.content_ready().get();
+                auto size = buf.size();
+                if(size == (end-start+1)){
+                    std::swap(cache->buffer,vecBuffer.buffer);
+                    buf.close().get();
+                }else{
+                    continue;
+                }
+
+            }catch(std::exception &e){
+                LOG(ERROR) << "There was an error while reading downloaded chunk: " << e.what();
+                LOG(DEBUG) << "Chunk-range" << start << " - " << end;
+                if(file) {
+                    LOG(DEBUG) << "File ID " << file->getId();
+                    LOG(DEBUG) << "File Size " << file->getFileSize();
+                }
+                LOG(DEBUG) << "Url " << builder.to_string();
+                LOG(INFO) << "Retrying";
+                continue;
             }
-            LOG(DEBUG) << "Url " << builder.to_string();
-            LOG(INFO) << "Retrying";
-            vecBuffer.deleteBuffer();
-            return FileIO::download(fuseReq, file, cache, std::move(cacheName), start, end, backoff);
-        }
-        std::atomic_thread_fence(std::memory_order_release);
-        cache->event.signal();
+            std::atomic_thread_fence(std::memory_order_release);
+            cache->event.signal();
 
-        //write buffer to disk
-        boost::asio::post(WritePool,
-                           [cacheName, id=file->getId()]() -> void {
-                               DownloadItem strong_cache = DownloadCache.get(cacheName);
-                               if (strong_cache && strong_cache->buffer != nullptr) {
-                                   fs::path path = downloadPath;
-                                   path /= cacheName;
-                                   FILE *fp = fopen(path.string().c_str(), "wb");
-                                   if (fp != nullptr) {
-                                       fwrite(strong_cache->buffer->data(), sizeof(unsigned char), strong_cache->buffer->size(), fp);
-                                       fclose(fp);
-                                       fs::permissions(path, fs::owner_all);
-                                       insertFileToCacheDatabase(path, strong_cache->buffer->size());
+            //write buffer to disk
+            boost::asio::post(WritePool,
+                               [cacheName, id=file->getId()]() -> void {
+                                   DownloadItem strong_cache = DownloadCache.get(cacheName);
+                                   if (strong_cache && strong_cache->buffer != nullptr) {
+                                       fs::path path = downloadPath;
+                                       path /= cacheName;
+                                       FILE *fp = fopen(path.string().c_str(), "wb");
+                                       if (fp != nullptr) {
+                                           fwrite(strong_cache->buffer->data(), sizeof(unsigned char), strong_cache->buffer->size(), fp);
+                                           fclose(fp);
+                                           fs::permissions(path, fs::owner_all);
+                                           insertFileToCacheDatabase(path, strong_cache->buffer->size());
+                                       }
+                                       strong_cache.reset();
                                    }
-                                   strong_cache.reset();
-                               }
-                           });
+                               });
 
-//        fs::path path = downloadPath;
-//        path /= cacheName;
-//        FILE *fp = fopen(path.string().c_str(), "wb");
-//        if (fp != nullptr){
-//            auto const * buf = cache->buffer;
-//            fwrite(buf->data(), sizeof(unsigned char), buf->size(), fp);
-//            fclose(fp);
-//            fs::permissions(path, fs::owner_all);
-//            insertFileToCacheDatabase(path, buf->size());
-//        }
-//        fs::permissions(path, fs::owner_all);
+    //        fs::path path = downloadPath;
+    //        path /= cacheName;
+    //        FILE *fp = fopen(path.string().c_str(), "wb");
+    //        if (fp != nullptr){
+    //            auto const * buf = cache->buffer;
+    //            fwrite(buf->data(), sizeof(unsigned char), buf->size(), fp);
+    //            fclose(fp);
+    //            fs::permissions(path, fs::owner_all);
+    //            insertFileToCacheDatabase(path, buf->size());
+    //        }
+    //        fs::permissions(path, fs::owner_all);
 
 
-    return true;
+            return true;
+        }
+
+        fuse_reply_err(fuseReq, EIO);
+        return false;
     }
 
     void FileIO::create_write_buffer(){
@@ -549,7 +553,7 @@ namespace DriveFS{
                                    auto strong_file = weak_file.lock();
 
                                    if (strong_obj && strong_file) {
-                                       FileIO::download(req, strong_file.get(), strong_obj.get(), cacheName2, start, start + chunkSize - 1, 0);
+                                       FileIO::download(req, strong_file.get(), strong_obj.get(), cacheName2, start, start + chunkSize - 1);
                                    }
                                    strong_file.reset();
                                    strong_obj.reset();

@@ -131,7 +131,7 @@ namespace DriveFS {
 
         void _upload();
         bool checkFileExists();
-        static bool download(fuse_req_t req, _Object *file, __no_collision_download__ *cache, std::string cacheName, uint64_t start, uint64_t end,  uint_fast8_t backoff);
+        static bool download(fuse_req_t req, _Object *file, __no_collision_download__ *cache, std::string cacheName, uint64_t start, uint64_t end);
 //        static pplx::task<http_response> download(_Object *file, uint64_t start, uint64_t end);
 //        static bool handleDownloadResponse(http_response &&resp,
 //                                                       fuse_req_t req,
