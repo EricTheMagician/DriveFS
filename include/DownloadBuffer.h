@@ -64,7 +64,7 @@ struct __no_collision_download__{
 class PriorityCache{
 public:
     PriorityCache(size_t block_download_size, size_t max_cache_size):
-            idToDownload( std::ceil(max_cache_size * 1.2 / block_download_size )),
+            idToDownload( std::ceil(max_cache_size * 1.02 / block_download_size )),
             m_block_download_size(block_download_size){
     }
     DownloadItem insert(std::string const &id, DownloadItem const &item){
