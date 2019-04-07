@@ -84,7 +84,12 @@ namespace DriveFS {
             return m_readable;
         }
 
-        bool bufferMatchesExpectedBufferSize(const size_t &bufferSize);
+        inline bool bufferMatchesExpectedBufferSize(const size_t &bufferSize){
+            return (bufferSize == block_download_size) || (bufferSize == m_file->getFileSize() % block_download_size);
+        }
+        inline bool bufferMatchesExpectedBufferSize(const size_t &bufferSize, off_t offset){
+            return (bufferSize == block_download_size) || (offset + bufferSize == m_file->getFileSize());
+        }
 
         static void checkCacheSize();
         static bool finishedInitialCheck;
@@ -105,7 +110,7 @@ namespace DriveFS {
     public:
 
         void getFromCloud(fuse_req_t req, const size_t &size, const off_t &off);
-        DownloadItem getFromCache(std::string const &cacheName);
+        DownloadItem getFromCache(std::string const &cacheName, off_t off);
         void upload(bool runAsynchronously);
 
         std::string f_name; //f_name for the upload, d_name is the base download name

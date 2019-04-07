@@ -176,11 +176,6 @@ namespace DriveFS{
     }
 
     bool FileIO::download(fuse_req_t fuseReq, _Object* file, __no_collision_download__ *cache, std::string cacheName, uint64_t start, uint64_t end) {
-        if(!file){
-            LOG(ERROR) << "While downloading a file, file was null for " << cacheName << " ("<<start <<", " << end << ")";
-            return false;
-        }
-
         struct VecBuffer{
 
             /*
@@ -242,8 +237,12 @@ namespace DriveFS{
 
             if(resp.status_code() == 404){
                 LOG(ERROR) << "Giving up for id " << file->getId();
-                fuse_reply_err(fuseReq, ENOENT);
+#warning todo remove from database
+                if(!fuseReq){
+                    fuse_reply_err(fuseReq, ENOENT);
+                }
                 DownloadCache.remove(cacheName);
+                cache->buffer = new std::vector<uint8_t>(0);
                 cache->event.signal();
                 return false;
             }
@@ -252,6 +251,7 @@ namespace DriveFS{
                 LOG(ERROR) << "Failed to get file fragment : " << resp.reason_phrase();
                 try {
                     if(resp.status_code() < 500) {
+                        resp.content_ready().get();
                         LOG(ERROR) << reinterpret_cast<const char *>(vecBuffer.buffer->data());
                     }else{
                         LOG(ERROR) << "status code is "<< resp.status_code();
@@ -259,6 +259,7 @@ namespace DriveFS{
                 }catch(std::exception &e){
                     LOG(ERROR) << e.what() << " - " << resp.status_code();
                 };
+
                 const unsigned int sleep_time = std::pow(2, backoff++);
                 LOG(INFO) << "Sleeping for " << sleep_time << " seconds before retrying";
                 sleep(sleep_time);
@@ -303,6 +304,7 @@ namespace DriveFS{
                                            fs::permissions(path, fs::owner_all);
                                            insertFileToCacheDatabase(path, strong_cache->buffer->size());
                                        }
+                                       strong_cache->event.signal();
                                        strong_cache.reset();
                                    }
                                });
@@ -324,6 +326,8 @@ namespace DriveFS{
         }
 
         fuse_reply_err(fuseReq, EIO);
+        cache->buffer = new std::vector<uint8_t>(0);
+        cache->event.signal();
         return false;
     }
 
@@ -339,14 +343,10 @@ namespace DriveFS{
         }
     }
 
-    bool FileIO::bufferMatchesExpectedBufferSize(const size_t &bufferSize){
-        return (bufferSize == block_download_size) || (bufferSize == m_file->getFileSize() % block_download_size);
-    }
-
     /*
      * \param spillover:bool is it from the spillover or the original
      */
-    DownloadItem FileIO::getFromCache(std::string const & chunkName){
+    DownloadItem FileIO::getFromCache(std::string const & chunkName, off_t off){
 
         fs::path path = downloadPath;
         path /= chunkName;
@@ -356,6 +356,9 @@ namespace DriveFS{
         }
 
         auto filesize = fs::file_size(path);
+        if(!bufferMatchesExpectedBufferSize(filesize, off)){
+            return nullptr;
+        }
         auto item = std::make_shared<__no_collision_download__>();
         auto item2 = FileManager::DownloadCache.insert(chunkName, item);
         if( item != item2){
@@ -420,11 +423,15 @@ namespace DriveFS{
             return nullptr;
         }();
 
-        if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId)) )
+        if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId, chunkStart)) )
              && (item->buffer != nullptr || (item->wait() && item->buffer != nullptr) )
-             && bufferMatchesExpectedBufferSize(item->buffer->size()) ) {
-            handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
-            repliedReq = !spillOver;
+           ) {
+            if(bufferMatchesExpectedBufferSize(item->buffer->size())){
+                handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
+                repliedReq = !spillOver;
+            }else{
+                return;
+            }
 
         }else{
            chunksToDownload.push_back(chunkNumber);
@@ -445,13 +452,17 @@ namespace DriveFS{
                 DownloadItem item;
 
 //                if ((item = DownloadCache.get(chunkId)) || (item = getFromCache(chunkId)) ){
-                if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId)) )
+                if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId, chunkStart2)) )
                      && (item->buffer != nullptr || (item->wait() && item->buffer != nullptr) )
-                     && bufferMatchesExpectedBufferSize(item->buffer->size()) ) {
-                    assert((spillOverPrecopy + size2) <= buffer->size());
-                    handleReplyData(req, item.get(), buffer, size2, 0, spillOver, &spillOverPrecopy);
-                    buffer = nullptr;
-                    repliedReq = true;
+                   ) {
+                    if(bufferMatchesExpectedBufferSize(item->buffer->size())){
+                        assert((spillOverPrecopy + size2) <= buffer->size());
+                        handleReplyData(req, item.get(), buffer, size2, 0, spillOver, &spillOverPrecopy);
+                        buffer = nullptr;
+                        repliedReq = true;
+                    }else{
+                        return;
+                    }
                 }  else {
                     chunksToDownload.push_back(chunkNumber2);
                 }
@@ -547,18 +558,19 @@ namespace DriveFS{
                                                }
                                            });
                     } else {
-                            boost::asio::post(*DownloadPool,
-                               [req, cacheName2, start, chunkSize, path, weak_file = std::weak_ptr<_Object>(localFile), weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
-                                   auto strong_obj = weak_obj.lock();
-                                   auto strong_file = weak_file.lock();
+                        bool isRequired = start >= off && start < off + _size;
+                        boost::asio::post(*DownloadPool,
+                           [req = isRequired ? req : nullptr, cacheName2, start, chunkSize, path, weak_file = std::weak_ptr<_Object>(localFile), weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
+                               auto strong_obj = weak_obj.lock();
+                               auto strong_file = weak_file.lock();
 
-                                   if (strong_obj && strong_file) {
-                                       FileIO::download(req, strong_file.get(), strong_obj.get(), cacheName2, start, start + chunkSize - 1);
-                                   }
-                                   strong_file.reset();
-                                   strong_obj.reset();
+                               if (strong_obj && strong_file) {
+                                   FileIO::download(req, strong_file.get(), strong_obj.get(), cacheName2, start, start + chunkSize - 1);
+                               }
+                               strong_file.reset();
+                               strong_obj.reset();
 
-                               });
+                           });
                         }
                 }
             }
@@ -960,7 +972,7 @@ namespace DriveFS{
         std::string sql_insert;
         sql_insert.reserve(1024*1024*2);
         sql_insert += "INSERT INTO " DBCACHENAME "(path,size,mtime,exists) VALUES ";
-        for(fs::directory_entry& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {})) {            
+        for(fs::directory_entry& entry : boost::make_iterator_range(fs::directory_iterator(downloadPath), {})) {
             if(fs::exists(entry)) {
                 fs::permissions(entry, fs::owner_all);
                 size_t size = fs::file_size(entry);;
