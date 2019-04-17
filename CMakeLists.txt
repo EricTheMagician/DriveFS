@@ -146,7 +146,6 @@ MESSAGE("fuse libraries are: ${LIBFUSE_LIBRARIES}")
 target_link_libraries(${PROJECT_NAME}
         ${FUSE_LIBRARIES}
         CONAN_PKG::jemalloc
-        pthread_nonshared.a
         CONAN_PKG::boost
         CONAN_PKG::OpenSSL
         CONAN_PKG::cpprestsdk
