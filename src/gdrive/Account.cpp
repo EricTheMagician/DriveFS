@@ -239,12 +239,12 @@ namespace DriveFS {
         std::string at, rt;
         try {
             std::string sql =
-            "SELECT value FROM " DATABASESETTINGS " WHERE name=\'" GDRIVEACCESSTOKENNAME "\';";
+            "SELECT value FROM " DATABASESETTINGS " WHERE name=\'" GDRIVEACCESSTOKENNAME "\' and value is not null and length(value) > 1";
             LOG(INFO) << sql;
             pqxx::row at_ = w->exec1(sql);
             sql.clear();
 
-            sql = "SELECT value FROM " DATABASESETTINGS " WHERE name=\'" GDRIVEREFRESHTOKENNAME "\';";
+            sql = "SELECT value FROM " DATABASESETTINGS " WHERE name=\'" GDRIVEREFRESHTOKENNAME "\' and value is not null and length(value) > 1";
             pqxx::row rt_ = w->exec1(sql);
             at = at_[0].c_str();
             rt = rt_[0].c_str();
