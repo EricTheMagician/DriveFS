@@ -214,6 +214,7 @@ namespace DriveFS{
             req.set_method(methods::GET);
             req.set_request_uri(builder.to_uri());
             req.set_response_stream(buf);
+
             headers.add("Range", range);
 
             VLOG(9) << req.headers()["Range"];
@@ -430,6 +431,7 @@ namespace DriveFS{
                 handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
                 repliedReq = !spillOver;
             }else{
+                fuse_reply_err(req, EIO);
                 return;
             }
 
@@ -461,6 +463,7 @@ namespace DriveFS{
                         buffer = nullptr;
                         repliedReq = true;
                     }else{
+                        fuse_reply_err(req, EIO);
                         return;
                     }
                 }  else {
@@ -1079,7 +1082,8 @@ namespace DriveFS{
         }
         int64_t oldSize = FileIO::cacheSize.load(std::memory_order_relaxed);
         int64_t workingSize = oldSize,
-        targetSize = ((double)FileIO::maxCacheOnDisk) * 0.9;
+        // delete at most 50gb below the maximum
+        targetSize = std::max<double>(FileIO::maxCacheOnDisk * 0.9, FileIO::maxCacheOnDisk - 50*1024*1024*1024);
 
         std::string sql_select = "SELECT path,size,mtime FROM " DBCACHENAME " WHERE exists=true ORDER BY mtime ASC LIMIT 1000";
 

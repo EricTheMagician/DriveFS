@@ -5,14 +5,15 @@ class DriveFSConan(ConanFile):
 
     # conan remote add public-conan https://api.bintray.com/conan/bincrafters/public-conan
     # conan remote add bisect https://api.bintray.com/conan/bisect/bisect
-    # conan remote add ess-dmsc https://api.bintray.com/conan/ess-dmsc/conan
+    # conan remote add qubusproject https://api.bintray.com/conan/qubusproject/conan
     # conan install /DriveFS  --build missing -s compiler.libcxx=libstdc++11
+    # conan remote add ess-dmsc https://api.bintray.com/conan/ess-dmsc/conan
 
     requires = (
             "boost/1.69.0@conan/stable",
             "libpqxx/6.3.3@bincrafters/stable",
             "cpprestsdk/2.10.10@bincrafters/stable","OpenSSL/1.0.2r@conan/stable",
-            "jemalloc/5.0.1@ess-dmsc/stable"
+            "jemalloc/5.1.0@qubusproject/stable"
     )
 
     generators = "cmake"

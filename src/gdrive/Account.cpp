@@ -1301,62 +1301,16 @@ where c.column_b = t.column_b;
     }
 
     void Account::upsertFileToDatabase(GDriveObject file) {
-#warning upsert
-        /*
         if (file) {
-            mongocxx::pool::entry conn = pool.acquire();
-            mongocxx::database client = conn->database(std::string(DATABASENAME));
-            mongocxx::collection data = client[std::string(DATABASEDATA)];
-            auto count = data.count(document{} << "id" << file->getId() << finalize);
+            db_handle_t db;
+            auto w = db.getWork();
+//            auto count = data.count(document{} << "id" << file->getId() << finalize);
             file->m_event.wait();
-            try {
 
-                if (count == 0) {
-                    auto status = data.insert_one(
-                            //                            document{} << "id" << file->getId() <<
-                            //                            finalize,
-                            document{} << concatenate(file->to_bson(true)) << finalize
-                            //,find_and_upsert
-                    );
-                } else {
-                    auto status =
-                            data.update_one(document{} << "id" << file->getId() << finalize,
-                                            document{} << "$set" << open_document
-                                                       << concatenate(file->to_bson(false))
-                                                       << close_document << finalize
-                                    //,find_and_upsert
-                            );
-                }
-            } catch (std::exception &e) {
-                try {
-                    auto status =
-                            data.update_one(document{} << "id" << file->getId() << finalize,
-                                            document{} << "$set" << open_document
-                                                       << concatenate(file->to_bson(false))
-                                                       << close_document << finalize
-                                    //,find_and_upsert
-                            );
-                } catch (std::exception &e) {
-                    LOG(ERROR) << e.what() << "\ncount was: " << count;
-                    LOG(INFO) << "\n"
-                              << "db." << DATABASEDATA << ".update({ id: \'"
-                              << file->getId() << "\'},"
-                              << "{ $set:  " << bsoncxx::to_json(file->to_bson(true))
-                              << "})";
-                    //                auto status = data.update_one(
-                    //                        document{} << "id" << file->getId() <<
-                    //                        finalize, document{} << "$set" <<
-                    //                        open_document <<
-                    //                        concatenate(file->to_bson(false)) <<
-                    //                        close_document
-                    //                                   << finalize,
-                    //                        upsert
-                    //                );
-                }
-            }
+
             file->m_event.signal();
         }
-         */
+
     }
 
     std::string Account::getUploadUrlForFile(GDriveObject file,
@@ -1393,11 +1347,7 @@ where c.column_b = t.column_b;
         VLOG(9) << "Body for getting upload url";
         VLOG(9) << jsonValue.serialize();
         req.set_body(jsonValue.serialize(), "application/json");
-        //        json::value body;
-        //        body["id"] = file->getId();
-        //        body["createdTime"] = file->getCreatedTimeAsString();
-        //        body["name"]
-        //        req.set_body(body);
+
         req.set_request_uri(builder.to_uri());
         req.set_method(methods::POST);
 
