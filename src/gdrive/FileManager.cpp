@@ -69,7 +69,9 @@ namespace DriveFS::FileManager{
         std::vector<GDriveObject> results;
         results.reserve(result.size());
         for(const pqxx::row &row: result){
-            results.push_back(fromInode(row[0].as<ino_t>()));
+            if(GDriveObject gd = fromInode(row[0].as<ino_t>())){
+                results.push_back(std::move(gd));
+            }
 
         }
         return results;
@@ -255,6 +257,7 @@ namespace DriveFS::FileManager{
             return nullptr;
         }catch(std::exception &e){
             LOG(ERROR) << e.what();
+            LOG(ERROR) << sql;
             return nullptr;
         }
 
