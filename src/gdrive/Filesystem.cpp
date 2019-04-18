@@ -49,7 +49,7 @@ namespace DriveFS{
         }
     }
 
-    void forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup){
+    void forget(fuse_req_t req, fuse_ino_t /*ino*/, uint64_t /*nlookup*/){
 //        auto object = FileManager::fromInode(ino);
 //        if (object) {
 //            object->forget(nlookup);

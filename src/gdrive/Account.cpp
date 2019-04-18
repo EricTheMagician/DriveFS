@@ -532,7 +532,11 @@ where c.column_b = t.column_b;
                 }
 
 
-            }catch (pqxx::sql_error &e) {
+            } catch( const web::http::  http_exception& e) {
+                LOG(ERROR) << e.what();
+                continue;
+            }
+            catch (pqxx::sql_error &e) {
                 LOG(ERROR) << e.what();
                 LOG(FATAL) << e.sqlstate();
                 continue;
