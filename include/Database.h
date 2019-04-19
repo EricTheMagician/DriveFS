@@ -52,7 +52,7 @@ private:
         }
 
     private:
-
+        static std::string s_uri;
         pqxx::connection *createCon();
         void              releaseCon(pqxx::connection *c);
         uint32_t          initializeCons();
