@@ -7,6 +7,7 @@
 #include "easylogging++.h"
 #include "gdrive/Account.h"
 #include "gdrive/File.h"
+#include "gdrive/FileManager.h"
 #include <boost/circular_buffer.hpp>
 #include <boost/filesystem.hpp>
 #include <cpprest/http_client.h>
@@ -41,14 +42,14 @@ public:
   virtual GDriveObject createNewChild(GDriveObject const &parent, const char *name,
                                       int mode, bool isFile);
   bool removeChildFromParent(GDriveObject const &child, GDriveObject const &parent);
-  virtual void upsertFileToDatabase(GDriveObject file);
+  virtual void upsertFileToDatabase(GDriveObject file, std::vector<std::string> const &parentId);
   virtual std::string
   getUploadUrlForFile(GDriveObject file,
-                      std::string mimeType = "application/octet-stream",
+                      std::string mimeType = GOOGLE_FILE,
                       int backoff = 0);
   virtual bool upload(std::string uploadUrl, std::string filePath,
                       size_t fileSize, int64_t start = 0,
-                      std::string mimeType = "application/octet-stream");
+                      std::string mimeType = GOOGLE_FILE);
   std::optional<int64_t>
   getResumableUploadPoint(std::string url, size_t fileSize, int backoff = 0);
   virtual bool updateObjectProperties(std::string id, std::string json,

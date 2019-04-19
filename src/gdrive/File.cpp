@@ -15,9 +15,6 @@
 
 constexpr std::string_view google_folder_type = "application/vnd.google-apps.folder";
 
-#define APP_UID "driveFS_uid"
-#define APP_GID "driveFS_gid"
-#define APP_MODE "driveFS_mode"
 
 static adaptive::datetime::adaptive_parser parser { adaptive::datetime::adaptive_parser::full_match, {
     "%Y-%m-%dT%H:%M:%SZ"
@@ -363,8 +360,12 @@ namespace DriveFS{
 */
 
 
-    std::string _Object::getCreatedTimeAsString() const{
+    std::string _Object::getCreatedTimeAsString() const noexcept{
         return getRFC3339StringFromTime(attribute.st_ctim);
+    }
+
+    std::string _Object::getModifiedTimeAsString() const noexcept{
+        return getRFC3339StringFromTime(attribute.st_mtim);
     }
 
 

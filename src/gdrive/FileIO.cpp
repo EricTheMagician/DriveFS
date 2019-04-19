@@ -1083,7 +1083,7 @@ namespace DriveFS{
         int64_t oldSize = FileIO::cacheSize.load(std::memory_order_relaxed);
         int64_t workingSize = oldSize,
         // delete at most 50gb below the maximum
-        targetSize = std::max<double>(FileIO::maxCacheOnDisk * 0.9, FileIO::maxCacheOnDisk - 50*1024*1024*1024);
+        targetSize = std::max<int64_t>(FileIO::maxCacheOnDisk * 0.9, FileIO::maxCacheOnDisk - 50LL*1024LL*1024LL*1024LL);
 
         std::string sql_select = "SELECT path,size,mtime FROM " DBCACHENAME " WHERE exists=true ORDER BY mtime ASC LIMIT 1000";
 

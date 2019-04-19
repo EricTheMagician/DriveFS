@@ -44,20 +44,25 @@ namespace DriveFS {
 
         inline const std::string& getName() const{return m_name;}
         inline const std::string& getId() const{return m_id;}
-        inline bool getIsFolder() const {return isFolder;};
+        inline bool getIsFolder() const {return isFolder;}
 //        bool removeChild(GDriveObject child);
 //        bool removeParent(GDriveObject child);
 
-        inline bool getIsUploaded() const{return isUploaded;}
-        inline void setIsUploaded(bool status) {isUploaded = status;}
-        inline bool getIsTrashed() const {return trashed; }
+        inline bool getIsUploaded() const noexcept {return isUploaded;}
+        inline void setIsUploaded(bool status) noexcept  {isUploaded = status;}
+        inline bool getIsTrashed() const noexcept {return trashed; }
+        inline bool getIsTrashable() const  noexcept  {return isTrashable; }
+        inline bool getCanRename() const noexcept {return canRename; }
+        inline uint_fast64_t getVersion() const noexcept {return version;}
+
+        std::string getModifiedTimeAsString() const noexcept;
+        std::string getCreatedTimeAsString() const noexcept;
         void trash();
         static void trash(GDriveObject file);
-        std::string md5() const { return md5Checksum; };
+        std::string md5() const { return md5Checksum; }
 //        GDriveObject findChildByName( const char *name) const ;
 //        bsoncxx::document::value to_bson(bool includeId=true) const;
 //        bsoncxx::document::value to_rename_bson() const;
-        std::string getCreatedTimeAsString() const;
         void setName(const char *name){
             m_name = name;
         }
@@ -80,5 +85,8 @@ namespace DriveFS {
     };
 
 }
+#define APP_UID "driveFS_uid"
+#define APP_GID "driveFS_gid"
+#define APP_MODE "driveFS_mode"
 
 #endif //DRIVEFS_FILE_H

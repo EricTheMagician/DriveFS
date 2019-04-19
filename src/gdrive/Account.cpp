@@ -127,6 +127,69 @@ namespace DriveFS {
             }
 
         }
+        void appendSqlRepresentationFromObject(std::string *_sql, _Object *file, pqxx::work *w, bool *wasFirst, std::vector<std::string> parentIds){
+            std::string &sql = *_sql;
+            try {
+                bool trashed = file->getIsTrashed();
+                if(*wasFirst)
+                    *wasFirst=false;
+                else
+                    sql+= ", ";
+
+                std::string mimeType = file->getIsFolder() ? GOOGLE_FOLDER : GOOGLE_FILE;
+
+                bool isTrashable = file->getIsTrashable();
+                bool canRename = file->getCanRename();
+                bool canDownload = !file->getIsFolder();
+                std::string size = std::to_string(file->attribute.st_size);
+                uint uid = file->attribute.st_uid, gid = file->attribute.st_gid, mode=file->attribute.st_mode;
+                std::string parents;
+                parents.reserve(1000);
+                bool wasFirstParent = true;
+                parents += "{";
+                for (auto &parent: parentIds) {
+                    if (wasFirstParent) {
+                        wasFirstParent = false;
+                    } else {
+                        parents += ",";
+                    }
+                    parents += "\"" + parent + "\"";
+                }
+                parents += "}";
+
+                sql += "('" + w->esc(file->getId());
+                sql += "','" + w->esc(file->getName());
+                sql += "','" + parents;
+                sql += "','" + w->esc(mimeType);
+                sql += "','" + file->md5();
+                sql += "',";
+                sql += size;
+                sql += ",";
+                sql +=  (isTrashable ? "true" : "false");
+                sql += ",";
+                sql += ( canRename ? "true" : "false");
+                sql += ",";
+                sql += ( canDownload ? "true" : "false");
+                sql += ",";
+                sql += ( trashed ? "true" : "false");
+                sql += ",'"  + w->esc(file->getModifiedTimeAsString());
+                sql += "','" + w->esc(file->getCreatedTimeAsString());
+                sql += "'," + std::to_string(file->getVersion());
+                sql += ", " + std::to_string(file->attribute.st_ino);
+                sql += "," + std::to_string(uid);
+                sql += "," + std::to_string(gid);
+                sql += "," + std::to_string(mode);
+
+                sql += ") ";
+            }catch(std::exception &e){
+                LOG(ERROR) << e.what();
+                LOG(DEBUG) << file->getId();
+                LOG(DEBUG) << sql;
+                assert(false);
+                std::exit(0);
+            }
+        }
+
     }
     Account::Account(std::string dbUri)
             : BaseAccount(dbUri, "https://www.googleapis.com/drive/v3/",
@@ -333,9 +396,7 @@ from (values
 where c.column_b = t.column_b;
                  https://stackoverflow.com/questions/18797608/update-multiple-rows-in-same-query-using-postgresql
                  */
-                sql_insert += "INSERT INTO ";
-                sql_insert += DATABASEDATA;
-                sql_insert += "(id,name,parents,mimeType,md5Checksum,"
+                sql_insert += "INSERT INTO " DATABASEDATA "(id,name,parents,mimeType,md5Checksum,"
                               "size,"
                               "isTrashable,canRename,canDownload,"
                               "trashed,modifiedTime,createdTime, version, inode,uid,gid,mode)"
@@ -899,7 +960,7 @@ where c.column_b = t.column_b;
                " VALUES ";
             bool wasFirst=true;
             pqxx::work *w = db.getWork();
-            int count = 0;
+
             for (auto &file: files) {
                 detail::appendSqlRepresentationFromJson(&sql, file, getNextInode(), w, &wasFirst);
 
@@ -1304,13 +1365,28 @@ where c.column_b = t.column_b;
         return true;
     }
 
-    void Account::upsertFileToDatabase(GDriveObject file) {
+    void Account::upsertFileToDatabase(GDriveObject file, const std::vector<std::string> &parentIds) {
         if (file) {
             db_handle_t db;
             auto w = db.getWork();
 //            auto count = data.count(document{} << "id" << file->getId() << finalize);
             file->m_event.wait();
 
+            std::string sql;
+            sql.reserve(512);
+            sql += "INSERT INTO " DATABASEDATA "(id,name,parents,mimeType,md5Checksum,"
+                          "size,"
+                          "isTrashable,canRename,canDownload,"
+                          "trashed,modifiedTime,createdTime, version, inode,uid,gid,mode)"
+                          " VALUES ";
+            bool wasFirst = true;
+            detail::appendSqlRepresentationFromObject(&sql, file.get(), w, &wasFirst, parentIds);
+            sql += " ON CONFLICT (id) DO UPDATE SET "
+                          "name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
+                          "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,createdTime=EXCLUDED.createdTime";
+
+            w->exec(sql);
+            w->commit();
 
             file->m_event.signal();
         }

@@ -28,3 +28,4 @@ namespace DriveFS::FileManager{
 #define APP_GID "driveFS_gid"
 #define APP_MODE "driveFS_mode"
 #define GOOGLE_FOLDER "application/vnd.google-apps.folder"
+#define GOOGLE_FILE "application/octet-stream"
