@@ -127,7 +127,7 @@ namespace DriveFS {
             }
 
         }
-        void appendSqlRepresentationFromObject(std::string *_sql, _Object *file, pqxx::work *w, bool *wasFirst, std::vector<std::string> parentIds){
+        void appendSqlRepresentationFromObject(std::string *_sql, _Object *file, pqxx::work *w, bool *wasFirst, std::vector<std::string> parentIds, bool updateParents=true){
             std::string &sql = *_sql;
             try {
                 bool trashed = file->getIsTrashed();
@@ -159,7 +159,9 @@ namespace DriveFS {
 
                 sql += "('" + w->esc(file->getId());
                 sql += "','" + w->esc(file->getName());
-                sql += "','" + parents;
+                if(updateParents){
+                    sql += "','" + parents;
+                }
                 sql += "','" + w->esc(mimeType);
                 sql += "','" + file->md5();
                 sql += "',";
@@ -535,6 +537,7 @@ where c.column_b = t.column_b;
                 if (!not_needs_updating or !not_hasItemsToDelete) {
                     if (!not_needs_updating) {
                         sql_insert += " ON CONFLICT (id) DO UPDATE SET "
+                                      "parents=EXCLUDED.parents,"
                                       "name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
                                       "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,createdTime=EXCLUDED.createdTime";
 
@@ -578,7 +581,6 @@ where c.column_b = t.column_b;
                         LOG(DEBUG) << sql_insert;
                     }
 
-                    w->commit();
                     for(auto const &objectId: objectToInvalidate){
                         invalidateId(objectId);
                     }
@@ -587,7 +589,7 @@ where c.column_b = t.column_b;
                     }
 
                 }
-
+                w->commit();
                 if (hasNextPageTokenField) {
                     continue;
                 }
@@ -965,7 +967,7 @@ where c.column_b = t.column_b;
                 detail::appendSqlRepresentationFromJson(&sql, file, getNextInode(), w, &wasFirst);
 
             }
-            sql += " ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
+            sql += " ON CONFLICT (id) DO UPDATE SET parents=EXCLUDED.parents, name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
                    "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,createdTime=EXCLUDED.createdTime";
             w->exec(sql);
             w->commit();
@@ -1365,25 +1367,65 @@ where c.column_b = t.column_b;
         return true;
     }
 
+    void Account::insertFileToDatabase(GDriveObject file, const std::string &parentId) {
+        file->m_event.wait();
+        db_handle_t db;
+        auto w = db.getWork();
+
+        std::string sql;
+        sql.reserve(512);
+        sql += "INSERT INTO " DATABASEDATA "(id,name,parents,mimeType,md5Checksum,"
+                      "size,"
+                      "isTrashable,canRename,canDownload,"
+                      "trashed,modifiedTime,createdTime, version, inode,uid,gid,mode)"
+                      " VALUES ";
+        bool wasFirst = true;
+        detail::appendSqlRepresentationFromObject(&sql, file.get(), w, &wasFirst, {parentId});
+        sql += " ON CONFLICT (id) DO UPDATE SET "
+                      "name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
+                      "parents=EXCLUDED.parents,"
+                      "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,createdTime=EXCLUDED.createdTime";
+
+        try{
+            w->exec(sql);
+        }catch(std::exception &e){
+            LOG(ERROR) << sql;
+            LOG(FATAL) << "There was an error with inserting file in to the database: " << e.what();
+        }
+        w->commit();
+
+        file->m_event.signal();
+    }
+
     void Account::upsertFileToDatabase(GDriveObject file, const std::vector<std::string> &parentIds) {
         if (file) {
             db_handle_t db;
             auto w = db.getWork();
 //            auto count = data.count(document{} << "id" << file->getId() << finalize);
+            bool updateParents = !parentIds.empty();
             file->m_event.wait();
 
             std::string sql;
             sql.reserve(512);
-            sql += "INSERT INTO " DATABASEDATA "(id,name,parents,mimeType,md5Checksum,"
-                          "size,"
-                          "isTrashable,canRename,canDownload,"
-                          "trashed,modifiedTime,createdTime, version, inode,uid,gid,mode)"
-                          " VALUES ";
+            sql += "INSERT INTO " DATABASEDATA "(id,name,";
+            if(updateParents){
+                sql += "parents,";
+            }
+            sql +=    "mimeType,md5Checksum,"
+                      "size,"
+                      "isTrashable,canRename,canDownload,"
+                      "trashed,modifiedTime,createdTime, version, inode,uid,gid,mode)"
+                      " VALUES ";
             bool wasFirst = true;
-            detail::appendSqlRepresentationFromObject(&sql, file.get(), w, &wasFirst, parentIds);
+            detail::appendSqlRepresentationFromObject(&sql, file.get(), w, &wasFirst, parentIds, updateParents);
             sql += " ON CONFLICT (id) DO UPDATE SET "
-                          "name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
-                          "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,createdTime=EXCLUDED.createdTime";
+                   "name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
+                   "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,";
+            if(updateParents){
+                sql += "parents=EXCLUDED=parents,";
+            }
+
+            sql += "createdTime=EXCLUDED.createdTime";
 
             w->exec(sql);
             w->commit();

@@ -108,6 +108,7 @@ namespace DriveFS::FileManager{
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << "unable to find inode for parent_id " << id
                        << " and child name " << name;
+            w->commit();
             return nullptr;
         }catch(pqxx::unexpected_rows &e){
             if(logSqlFailure) {
@@ -115,9 +116,11 @@ namespace DriveFS::FileManager{
                            << " and child name " << name;
                 LOG(ERROR) << sql;
             }
+            w->commit();
             return nullptr;
         }catch(std::exception &e){
             LOG(ERROR) << e.what();
+            w->commit();
             return nullptr;
         }
 
@@ -267,6 +270,7 @@ namespace DriveFS::FileManager{
                 std::string &&mimeType, size_t &&size, std::string &&md5);
 
  */
+
         GDriveObject so = std::make_shared<_Object>(inode,                                       // inode
                                                     result[6].as<std::string>(),                            // id
                                                     result[0].as<std::string>(),                            // name
@@ -327,10 +331,10 @@ namespace DriveFS::FileManager{
 
     }
 
-    bool removeFileFromDatabase(std::string const &id){
+    bool removeFileWithIDFromDB(std::string const &id){
         std::string sql;
         sql.reserve(256);
-        snprintf(sql.data(), 256, "DELETE FROOM" DATABASEDATA " WHERE id='%s'", id.c_str());
+        snprintf(sql.data(), 256, "DELETE FROM" DATABASEDATA " WHERE id='%s'", id.c_str());
         db_handle_t db;
         auto w = db.getWork();
         try {

@@ -53,14 +53,15 @@ std::string getRFC3339StringFromTime(const struct timespec &time){
 namespace DriveFS{
 
 
-    _Object::_Object():File(), isUploaded(false){
+    _Object::_Object():File(), isUploaded(false), version(1){
     }
 
     _Object::_Object(ino_t ino, const std::string &id, const char *name, mode_t mode, bool isFile):
             File(name),
             isFolder(!isFile),
             isTrashable(true), canRename(true),
-            trashed(false)
+            trashed(false),
+            version(1)
     {
         memset(&attribute, 0, sizeof(struct stat));
         if(isFile) {
@@ -141,7 +142,8 @@ namespace DriveFS{
             int uid, int gid, int mode, bool trashed): File(name.c_str()),
             isFolder(mimeType==google_folder_type),
             m_id(std::move(id)),
-            trashed(trashed)
+            trashed(trashed),
+            version(1)
 
             {
         struct stat &attribute = this->attribute;

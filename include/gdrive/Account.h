@@ -43,8 +43,8 @@ public:
                                       int mode, bool isFile);
   bool removeChildFromParent(GDriveObject const &child, GDriveObject const &parent);
   virtual void upsertFileToDatabase(GDriveObject file, std::vector<std::string> const &parentId);
-  virtual std::string
-  getUploadUrlForFile(GDriveObject file,
+  virtual void insertFileToDatabase(GDriveObject file, std::string const &parentId = {});
+  virtual std::string getUploadUrlForFile(GDriveObject file,
                       std::string mimeType = GOOGLE_FILE,
                       int backoff = 0);
   virtual bool upload(std::string uploadUrl, std::string filePath,
@@ -78,12 +78,12 @@ private:
   virtual void background_update(std::string teamDriveId);
   std::string getRootFolderId();
   void setMaximumInodeFromDatabase();
-  std::string m_rootFolderId;
   void invalidateParentEntries(const GDriveObject &obj);
   void invalidateParentEntries(std::string const &id);
   void invalidateParentEntries(const pqxx::result &result);
   void invalidateId(std::string const &id);
   boost::circular_buffer<std::string> m_id_buffer;
+  std::string m_rootFolderId;
 
   std::map<std::string, std::string>
       m_newStartPageToken; // map teamDriveId to newStartPageToken

@@ -195,12 +195,15 @@ namespace DriveFS{
                         return;
                     }
                 }else{
-#warning todo
-//                    if(child->parents.empty()) {
-//                        account->removeFileWithIDFromDB(child->getId());
-//                    }else{
-//                        account->upsertFileToDatabase(child);
-//                    }
+                    auto parents = FileManager::getParentIds(child->getId());
+                    if(parents.empty() || parents.size() == 1) {
+                        FileManager::removeFileWithIDFromDB(child->getId());
+                    }else{
+                        parents.erase( std::remove_if(parents.begin(), parents.end(), [pid = parent->getId()](std::string const &in){ return in == pid;}),
+                                    parents.end()
+                                   );
+                        account->upsertFileToDatabase(child, parents);
+                    }
                 }
                 child->trash();
 
@@ -317,7 +320,6 @@ namespace DriveFS{
             child->setName(newname);
         }
         Account *account = getAccount(req);
-        account->upsertFileToDatabase(child);
 
         if(child->getIsUploaded()){
 
@@ -339,9 +341,10 @@ namespace DriveFS{
                 }
                 return;
             }
+            account->upsertFileToDatabase(child, {FileManager::fromInode(newparent_ino)->getId()});
         }else{
 //            FileIO
-            account->upsertFileToDatabase(child);
+            account->upsertFileToDatabase(child, {FileManager::fromInode(newparent_ino)->getId()});
         }
 
 //#if FUSE_USE_VERSION >= 30
@@ -576,7 +579,6 @@ namespace DriveFS{
                 fi->fh = 0;
             }
 
-//        });
     }
 
     void fsync(fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
@@ -826,8 +828,8 @@ namespace DriveFS{
         LOG(INFO) << "Creating file with name " << name << " and parent Id " << parent->getId();
 
         child = account->createNewChild(parent, name, mode, true);
-        FileIO *io = new FileIO(child, fi->flags);
-        fi->fh = (uintptr_t) io;
+        FileIO::shared_ptr io {new FileIO(child, fi->flags)};
+        fi->fh = (uintptr_t) io.get();
         struct fuse_entry_param e;
 
         memset(&e, 0, sizeof(struct fuse_entry_param));
@@ -838,12 +840,8 @@ namespace DriveFS{
         e.attr_timeout = 15;
         e.entry_timeout = 15;
 
-//#if FUSE_USE_VERSION >= 30
-//        fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
-//#else
-//        fuse_lowlevel_notify_inval_inode(account->fuse_channel, parent_ino, 0, 0);
-//#endif
-
+        account->insertFileToDatabase(child, parent->getId());
+        FileManager::insertObjectToMemoryMap(child);
 
         io->open();
         int reply_err = fuse_reply_create(req, &e, fi);
@@ -870,9 +868,11 @@ namespace DriveFS{
 
     void write_buf(fuse_req_t req, fuse_ino_t ino, struct fuse_bufvec *bufv, off_t off, struct fuse_file_info *fi) {
         struct fuse_bufvec dst = FUSE_BUFVEC_INIT(fuse_buf_size(bufv));
+        FileIO::shared_ptr io{ (FileIO *) fi->fh};
+        GDriveObject child = FileManager::fromInode(ino);
+        child->attribute.st_size = std::max<size_t>(child->attribute.st_size, off+bufv->buf->size);
 
         dst.buf[0].flags = (fuse_buf_flags) (FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK);
-        FileIO *io = (FileIO *) fi->fh;
         io->b_needs_uploading = true;
         io->b_needs_uploading = true;
         dst.buf[0].fd = io->m_fd;

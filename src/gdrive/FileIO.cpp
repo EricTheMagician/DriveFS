@@ -854,7 +854,7 @@ namespace DriveFS{
 
 
         if(b_needs_uploading){
-            m_account->upsertFileToDatabase(m_file);
+            m_account->upsertFileToDatabase(m_file, {});
 
             if(fs::exists(f_name)){
                 fs::path released;
