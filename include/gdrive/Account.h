@@ -42,8 +42,8 @@ public:
   virtual GDriveObject createNewChild(GDriveObject const &parent, const char *name,
                                       int mode, bool isFile);
   bool removeChildFromParent(GDriveObject const &child, GDriveObject const &parent);
-  virtual void upsertFileToDatabase(GDriveObject file, std::vector<std::string> const &parentId);
-  virtual void insertFileToDatabase(GDriveObject file, std::string const &parentId = {});
+  void upsertFileToDatabase(GDriveObject file, std::vector<std::string> const &parentId);
+  void insertFileToDatabase(GDriveObject file, std::string const &parentId);
   virtual std::string getUploadUrlForFile(GDriveObject file,
                       std::string mimeType = GOOGLE_FILE,
                       int backoff = 0);
@@ -69,6 +69,7 @@ protected:
 
 private:
   void parseFilesAndFolders(web::json::value value);
+  void resumeUploadsOnStartup();
   void getTeamDrives(int backoff = 0);
   void linkParentsAndChildren();
   std::string getUploadUrlForFile(http_request, int backoff = 1);

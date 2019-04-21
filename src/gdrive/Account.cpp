@@ -19,7 +19,6 @@
 #include "gdrive/FileManager.h"
 #include <algorithm>
 
-
 using namespace web::http;
 using namespace web::http::client;
 
@@ -270,7 +269,60 @@ namespace DriveFS {
         loadFilesAndFolders();
 
         SFAsync(&Account::background_update, this, std::string(""));
-//        this->background_update("");
+        resumeUploadsOnStartup();
+    }
+
+    void Account::resumeUploadsOnStartup(){
+        db_handle_t db;
+        auto w = db.getWork();
+
+        std::string sql = "SELECT inode, uploadUrl FROM " DATABASEDATA " WHERE "
+                "mimeType NOT LIKE 'application/vnd.google-apps.%' AND "
+                "(md5Checksum is NULL OR LENGTH(md5Checksum)=0) AND "
+                "trashed=false AND array_length(parents,1) > 0";
+        pqxx::result results;
+        try{
+            results = w->exec(sql);
+            w->commit();
+        }catch(std::exception &e){
+            LOG(ERROR) << e.what();
+            LOG(ERROR) << sql;
+            w->commit();
+            return;
+        }
+
+        for(auto const &result: results){
+            GDriveObject file = FileManager::fromInode(result[0].as<ino_t>());
+            std::string uploadUrl = result[1].is_null() ? "" : result[1].as<std::string>();
+
+            FileIO::shared_ptr io {new FileIO(file, 0)};
+            if (io->validateCachedFileForUpload(true)) {
+                auto parents = FileManager::getParentIds(file);
+                if (parents.empty()) {
+                    io->deleteObject();
+//                    toDelete << object->getId();
+//                    hasItemsToDelete = true;
+                    continue;
+                }
+
+                if (!uploadUrl.empty()) {
+                    LOG(INFO) << "Adding to queue upload of file with name "
+                              << file->getName() << " and id " << file->getId();
+                    io->resumeFileUploadFromUrl(uploadUrl, true);
+                } else {
+                    LOG(INFO) << "Adding to queue upload of file with name "
+                              << file->getName() << " and id " << file->getId();
+                    io->upload(true);
+                }
+            } else {
+                io->deleteObject();
+//                toDelete << object->getId();
+//                hasItemsToDelete = true;
+                continue;
+            }
+
+        }
+
     }
 
     void Account::run_internal() {
@@ -1305,7 +1357,7 @@ where c.column_b = t.column_b;
             return true;
         }else if (parentIds.size() == 1) {
 
-            status = child->getIsUploaded() ? true : this->trash(child);
+            status = child->getIsUploaded() ? this->trash(child): true;
             if(!status)
                 return false;
             snprintf( sql.data(), 256, "UPDATE " DATABASEDATA " SET parents='{}', trashed=true where inode=%lu", child->getInode());
@@ -1383,7 +1435,7 @@ where c.column_b = t.column_b;
         detail::appendSqlRepresentationFromObject(&sql, file.get(), w, &wasFirst, {parentId});
         sql += " ON CONFLICT (id) DO UPDATE SET "
                       "name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
-                      "parents=EXCLUDED.parents,"
+                      "parents=EXCLUDED.parents,size=EXCLUDED.size,"
                       "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,createdTime=EXCLUDED.createdTime";
 
         try{
@@ -1425,7 +1477,8 @@ where c.column_b = t.column_b;
                 sql += "parents=EXCLUDED=parents,";
             }
 
-            sql += "createdTime=EXCLUDED.createdTime";
+            sql += "createdTime=EXCLUDED.createdTime"
+                    ",size=EXCLUDED.size";
 
             w->exec(sql);
             w->commit();
@@ -1527,6 +1580,7 @@ where c.column_b = t.column_b;
                 LOG(ERROR) << e.what();
                 LOG(DEBUG) << sql;
             }
+            w->commit();
         }
 
         return location;
@@ -1646,7 +1700,7 @@ where c.column_b = t.column_b;
         try {
             response = client.request(request).get();
         } catch (std::exception &e) {
-            LOG(ERROR) << "There was an error resumeable upload link.";
+            LOG(ERROR) << "There was an error resumeable upload link." << e.what();
             int time = pow(2, backoff);
             LOG(ERROR) << "Sleeping for " << time << " seconds.";
             sleep(time);
@@ -1774,9 +1828,7 @@ where c.column_b = t.column_b;
 //        sql.clear();
 
         std::string sql;
-        sql += "SELECT (inode, name) FROM ";
-        sql += DATABASEDATA;
-        sql += " WHERE id='{";
+        sql += "SELECT (inode, name) FROM "  DATABASEDATA " WHERE id='{";
         bool wasFirst = true;
         for(auto const & parent: parents){
             if(wasFirst)
@@ -1790,9 +1842,11 @@ where c.column_b = t.column_b;
 
         try {
             invalidateParentEntries(work->exec(sql));
+            work->commit();
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << e.what();
             LOG(DEBUG) << sql;
+            work->commit();
         }
     }
 

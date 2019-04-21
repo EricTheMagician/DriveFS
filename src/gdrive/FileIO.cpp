@@ -684,8 +684,10 @@ namespace DriveFS{
                                io->checkFileExists();
                            }else if(!file->getIsUploaded()) {
                                io->_upload();
+                               io->m_file->setIsUploaded(true);
                            }else{
                                io->move_files_to_download_after_finish_uploading();
+                               io->m_file->setIsUploaded(true);
                            }
                        }
 
@@ -747,6 +749,7 @@ namespace DriveFS{
     }
 
     void FileIO::move_files_to_download_after_finish_uploading() {
+        this->m_file->setIsUploaded(true);
         if(move_files_to_download_on_finish_upload && !m_file->getIsTrashed()){
             auto uploadFileName = f_name + ".released";
             if(fs::exists(uploadFileName)) {
@@ -1230,16 +1233,21 @@ namespace DriveFS{
 
         size_t totalSize = 0;
         std::string  now = std::to_string(time(nullptr));
+        bool wasFirst = true;
         for(int i = 0; i < paths.size(); i++) {
             auto const & path = paths[i];
-
+            if(wasFirst){
+                wasFirst = false;
+            }else{
+                sql += ",";
+            }
             sql += "('";
             sql += path.string();
             sql += "',";
             sql += std::to_string(sizes[i]);
             sql += ",";
             sql += now;
-            sql += ", true) ";
+            sql += ", true)";
 
             totalSize += sizes[i];
         }

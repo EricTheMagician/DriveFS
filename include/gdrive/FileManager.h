@@ -15,6 +15,7 @@ namespace DriveFS::FileManager{
     extern std::vector<GDriveObject> getChildren(const std::string &parent_id);
     extern std::vector<GDriveObject> getParents(const std::string &child_id);
     extern std::vector<std::string> getParentIds(const std::string &child_id);
+    extern std::vector<std::string> getParentIds(GDriveObject const &file);
     extern GDriveObject insertObjectToMemoryMap(const GDriveObject &object);
 
     extern std::string asJSONForRename(std::string const &id);

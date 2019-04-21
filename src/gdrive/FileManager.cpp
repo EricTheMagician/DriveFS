@@ -92,6 +92,10 @@ namespace DriveFS::FileManager{
         return detail::getParentsFromDB(id);
     }
 
+    std::vector<std::string> getParentIds(GDriveObject const &file){
+        return detail::getParentsFromDB(file->getId());
+    }
+
     GDriveObject fromParentIdAndName(const std::string &id, char const* name, bool logSqlFailure){
         db_handle_t db;
         auto w = db.getWork();
@@ -334,7 +338,7 @@ namespace DriveFS::FileManager{
     bool removeFileWithIDFromDB(std::string const &id){
         std::string sql;
         sql.reserve(256);
-        snprintf(sql.data(), 256, "DELETE FROM" DATABASEDATA " WHERE id='%s'", id.c_str());
+        snprintf(sql.data(), 256, "DELETE FROM " DATABASEDATA " WHERE id='%s'", id.c_str());
         db_handle_t db;
         auto w = db.getWork();
         try {

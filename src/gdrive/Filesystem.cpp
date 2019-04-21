@@ -568,9 +568,12 @@ namespace DriveFS{
             io->release();
 
             if(io->b_needs_uploading){
+                Account *account = getAccount(req);
+                std::vector<std::string> pids{};
+                auto file = FileManager::fromInode(ino);
+                account->upsertFileToDatabase(file, pids);
                 //sleep for 3 seconds to make sure that the filesystem has not decided to delete the file.
                 fi->fh = 0;
-                auto file = FileManager::fromInode(ino);
                 if(file) {
                     io->upload(true);
                 }
