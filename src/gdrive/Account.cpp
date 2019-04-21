@@ -1566,10 +1566,10 @@ where c.column_b = t.column_b;
 
         if (backoff == 0) {
 
+            _lockObject lock(file.get());
             db_handle_t db;
             auto w = db.getWork();
 
-            _lockObject lock(file.get());
             std::string sql;
             sql.reserve(256);
             sql += "UPDATE " DATABASEDATA " SET uploadURL='";
@@ -1577,11 +1577,11 @@ where c.column_b = t.column_b;
             sql += "'";
             try {
                 w->exec(sql);
+                w->commit();
             }catch(std::exception &e){
                 LOG(ERROR) << e.what();
                 LOG(DEBUG) << sql;
             }
-            w->commit();
         }
 
         return location;
