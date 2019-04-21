@@ -817,7 +817,7 @@ namespace DriveFS{
             return;
         }
         _lockObject test { parent.get() };
-        GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
+        GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name, false);
         if (child) {
             LOG(INFO) << "When creating file with name " << name << " parentId " << parent->getId() << " already existed";
             int reply_err = fuse_reply_err(req, EEXIST);
