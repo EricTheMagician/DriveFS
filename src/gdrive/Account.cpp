@@ -1475,7 +1475,7 @@ where c.column_b = t.column_b;
                    "name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
                    "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,";
             if(updateParents){
-                sql += "parents=EXCLUDED=parents,";
+                sql += "parents=EXCLUDED.parents,";
             }
 
             sql += "createdTime=EXCLUDED.createdTime"
