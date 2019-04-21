@@ -40,7 +40,7 @@ public:
   };
 
   virtual GDriveObject createNewChild(GDriveObject const &parent, const char *name,
-                                      int mode, bool isFile);
+                                      mode_t mode, bool isFile);
   bool removeChildFromParent(GDriveObject const &child, GDriveObject const &parent);
   void upsertFileToDatabase(GDriveObject file, std::vector<std::string> const &parentId);
   void insertFileToDatabase(GDriveObject file, std::string const &parentId);

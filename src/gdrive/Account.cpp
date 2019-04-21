@@ -1279,8 +1279,9 @@ where c.column_b = t.column_b;
         return resp.extract_json(true).get();
     }
 
-    GDriveObject Account::createNewChild(GDriveObject const &parent, const char *name,
-                                         int mode, bool isFile) {
+    GDriveObject Account::
+    createNewChild(GDriveObject const &parent, const char *name,
+                                         mode_t mode, bool isFile) {
 
         auto obj = _Object(inode_count.fetch_add(1, std::memory_order_acquire) + 1,
                            getNextId(), name, mode, isFile);
