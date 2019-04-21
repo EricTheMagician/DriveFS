@@ -183,29 +183,29 @@ namespace DriveFS{
         GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
 
         if(child){
-                parent->m_event.signal();
-                signaled = true;
+            parent->m_event.signal();
+            signaled = true;
 
-                LOG(TRACE) << "Deleting file/folder with name " << name << " and parentId: "  << parent->getId();
+            LOG(TRACE) << "Deleting file/folder with name " << name << " and parentId: "  << parent->getId();
 
-                if (child->getIsUploaded()) {
-                    bool status =account->removeChildFromParent(child, parent);
-                    if(!status){
-                        fuse_reply_err(req, EIO);
-                        return;
-                    }
-                }else{
-                    auto parents = FileManager::getParentIds(child->getId());
-                    if(parents.empty() || parents.size() == 1) {
-                        FileManager::removeFileWithIDFromDB(child->getId());
-                    }else{
-                        parents.erase( std::remove_if(parents.begin(), parents.end(), [pid = parent->getId()](std::string const &in){ return in == pid;}),
-                                    parents.end()
-                                   );
-                        account->upsertFileToDatabase(child, parents);
-                    }
+            if (child->getIsUploaded()) {
+                bool status =account->removeChildFromParent(child, parent);
+                if(!status){
+                    fuse_reply_err(req, EIO);
+                    return;
                 }
-                child->trash();
+            }else{
+                auto parents = FileManager::getParentIds(child->getId());
+                if(parents.empty() || parents.size() == 1) {
+                    FileManager::removeFileWithIDFromDB(child->getId());
+                }else{
+                    parents.erase( std::remove_if(parents.begin(), parents.end(), [pid = parent->getId()](std::string const &in){ return in == pid;}),
+                                parents.end()
+                               );
+                    account->upsertFileToDatabase(child, parents);
+                }
+            }
+            child->trash();
 
 //#if FUSE_USE_VERSION >= 30
 //                fuse_lowlevel_notify_inval_inode(account->fuse_session, parent_ino, 0, 0);
@@ -550,8 +550,8 @@ namespace DriveFS{
     }
 
     void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-            FileIO *io = (FileIO *) fi->fh;
-            if(io == nullptr){
+            FileIO::shared_ptr io { (FileIO *) fi->fh};
+            if(io.get() == nullptr){
                 int reply_err = fuse_reply_err(req, EIO);
                 while(reply_err != 0){
                     LOG(ERROR) << "Threre was an error replying";
@@ -616,19 +616,12 @@ namespace DriveFS{
 
     void readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi){
         FolderIO::shared_ptr io = (FolderIO*)(fi->fh);
-//        if(io!= nullptr) {
-            reply_buf_limited(req, io->buffer->data(), io->accumulated_size,off,size);
-            return;
-//        }
-//        LOG(ERROR) << "When readding dir, the fi->fh was nullptr";
-//        int reply_err = fuse_reply_err(req, EIO);
-//        while(reply_err != 0){
-//            reply_err = fuse_reply_err(req, EIO);
-//        }
+        reply_buf_limited(req, io->buffer->data(), io->accumulated_size,off,size);
+        return;
     }
 
     void releasedir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-        FolderIO *io = (FolderIO *) fi->fh;
+        FolderIO::shared_ptr io {(FolderIO *) fi->fh};
         int reply_err = fuse_reply_err(req, 0);
         while(reply_err != 0){
             reply_err = fuse_reply_err(req, 0);
