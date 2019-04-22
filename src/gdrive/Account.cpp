@@ -1494,6 +1494,11 @@ where c.column_b = t.column_b;
         if (file->getIsTrashed()) {
             return "";
         }
+        const std::vector<std::string> parentIds = FileManager::getParentIds(file->getId());
+        if(parentIds.empty()){
+            return "";
+        }
+
         refresh_token();
 
         http_client client("https://www.googleapis.com/upload/drive/v3",
@@ -1511,8 +1516,6 @@ where c.column_b = t.column_b;
         headers.add("X-Upload-Content-Type", mimeType);
 
         web::json::value jsonValue;
-        const std::vector<std::string> parentIds = FileManager::getParentIds(file->getId());
-        assert( !parentIds.empty() );
         for (int i =0; i < parentIds.size(); i++) {
             jsonValue["parents"][i] = web::json::value::string(parentIds[0]);
         }
