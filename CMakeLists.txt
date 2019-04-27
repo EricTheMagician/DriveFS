@@ -34,7 +34,7 @@ set(common_src_files
         src/gdrive/FileManager.cpp
         include/gdrive/FileManager.h
         src/gdrive/Dedupe.cpp src/gdrive/Dedupe.h
-        src/lockable.cpp
+
         include/lockable.h
 
         )
