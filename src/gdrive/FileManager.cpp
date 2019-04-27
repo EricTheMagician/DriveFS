@@ -21,7 +21,7 @@ namespace DriveFS::FileManager{
         static boost::recursive_mutex  lruMutex;
         static std::vector<std::string> getParentsFromDB(std::string const &id){
             db_handle_t db;
-            auto nt = db.getWork();
+            auto nt = db.getTransaction();
             std::string sql;
             sql.reserve(512);
             snprintf(sql.data(), 512, "SELECT "
