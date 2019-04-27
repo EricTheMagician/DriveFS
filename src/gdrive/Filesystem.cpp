@@ -93,32 +93,33 @@ namespace DriveFS{
 
             return;
         }
-        file->m_event.wait();
-        if(to_set & FUSE_SET_ATTR_MODE){
-            file->attribute.st_mode = attr->st_mode;
+        {
+            std::lock_guard _lock(file->_mutex);
+            if(to_set & FUSE_SET_ATTR_MODE){
+                file->attribute.st_mode = attr->st_mode;
+            }
+
+            if(to_set & FUSE_SET_ATTR_ATIME){
+                file->attribute.st_atim = attr->st_atim;
+            }
+
+            if(to_set & FUSE_SET_ATTR_MTIME){
+                file->attribute.st_mtim = attr->st_mtim;
+            }
+            #if FUSE_VERSION >= 30
+            if(to_set & FUSE_SET_ATTR_CTIME){
+                file->attribute.st_ctim = attr->st_ctim;
+            }
+            #endif
+            if(to_set & FUSE_SET_ATTR_MTIME_NOW){
+                file->attribute.st_mtim = {time(nullptr),0};
+            }
+
+            if(to_set & FUSE_SET_ATTR_ATIME_NOW){
+                file->attribute.st_atim = {time(nullptr),0};
+            }
         }
 
-        if(to_set & FUSE_SET_ATTR_ATIME){
-            file->attribute.st_atim = attr->st_atim;
-        }
-
-        if(to_set & FUSE_SET_ATTR_MTIME){
-            file->attribute.st_mtim = attr->st_mtim;
-        }
-#if FUSE_VERSION >= 30
-        if(to_set & FUSE_SET_ATTR_CTIME){
-            file->attribute.st_ctim = attr->st_ctim;
-        }
-#endif
-        if(to_set & FUSE_SET_ATTR_MTIME_NOW){
-            file->attribute.st_mtim = {time(nullptr),0};
-        }
-
-        if(to_set & FUSE_SET_ATTR_ATIME_NOW){
-            file->attribute.st_atim = {time(nullptr),0};
-        }
-
-        file->m_event.signal();
         if(file->getIsUploaded()){
             auto account = getAccount(req);
             const bool status = account->updateObjectProperties(file->getId(), FileManager::asJSONForRename(file));
@@ -130,6 +131,7 @@ namespace DriveFS{
                 return;
             }
         }
+
 
         int reply_err = fuse_reply_attr(req, &(file->attribute), 18000.0);
         while(reply_err != 0){
@@ -178,12 +180,12 @@ namespace DriveFS{
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
         auto *account = getAccount(req);
         GDriveObject parent(FileManager::fromInode(parent_ino));
-        parent->m_event.wait();
+        parent->_mutex.lock();
         bool signaled = false;
         GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
 
         if(child){
-            parent->m_event.signal();
+            parent->_mutex.unlock();
             signaled = true;
 
             LOG(TRACE) << "Deleting file/folder with name " << name << " and parentId: "  << parent->getId();
@@ -471,17 +473,17 @@ namespace DriveFS{
 
         if(current != off) {
             // not current
-            io->m_file->m_event.wait();
+            io->m_file->_mutex.lock();
             io->m_event.wait();
 //            memcpy(io->write_buffer2, io->write_buffer, io->last_write_to_buffer);
             std::swap(io->write_buffer, io->write_buffer2);
-            io->m_file->m_event.signal();
+            io->m_file->_mutex.unlock();
             off_t off2 =  io->first_write_to_buffer,
                     end2 = io->last_write_to_buffer;
             SFAsync([io, off2,end2] {
                 fseek(io->m_fp, off2, SEEK_SET);
                 fwrite((char *)io->write_buffer2->data(), sizeof(char), end2, io->m_fp);
-                io->m_file->m_event.signal();
+                io->m_file->_mutex.unlock();
                 io->m_event.signal();
 
             });
@@ -492,12 +494,12 @@ namespace DriveFS{
 
         if(!(off >= start && off+size < end)) {
 //        }else {
-            io->m_file->m_event.wait();
+            io->m_file->_mutex.lock();
             io->m_event.wait();
 
 //            memcpy(io->write_buffer2, io->write_buffer, io->last_write_to_buffer);
             std::swap(io->write_buffer2, io->write_buffer);
-            io->m_file->m_event.signal();
+            io->m_file->_mutex.unlock();
             off_t off2 =  io->first_write_to_buffer,
                     end2 = io->last_write_to_buffer;
             SFAsync([io, off2,end2] {
@@ -510,9 +512,10 @@ namespace DriveFS{
             io->first_write_to_buffer = off;
 
         }
-        io->m_file->m_event.wait();
-        memcpy(io->write_buffer->data() + off - io->first_write_to_buffer, buf, size);
-        io->m_file->m_event.signal();
+        {
+            std::lock_guard lock(io->m_file->_mutex);
+            memcpy(io->write_buffer->data() + off - io->first_write_to_buffer, buf, size);
+        }
 
         io->last_write_to_buffer += size;
 

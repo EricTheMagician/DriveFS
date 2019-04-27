@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <atomic>
+#include <mutex>
 
 class File{
 
@@ -22,10 +23,10 @@ public:
     static uid_t executing_uid;
     static gid_t executing_gid;
     struct stat attribute;
-    File(): m_event(1), m_handle_creation_event(1), lookupCount(0){
+    File(): m_handle_creation_event(1), lookupCount(0){
         memset(&attribute, 0, sizeof(struct stat));
     }
-    File(const char *name):m_event(1), m_handle_creation_event(1), lookupCount(0), m_name(name){
+    File(const char *name): m_handle_creation_event(1), lookupCount(0), m_name(name){
         memset(&attribute, 0, sizeof(struct stat));
     }
 
@@ -36,7 +37,7 @@ public:
 public:
     std::atomic<int64_t> lookupCount; // for filesystem lookup count
 
-    AutoResetEvent m_event;
+    std::recursive_mutex _mutex;
 protected:
     std::string m_name;
 

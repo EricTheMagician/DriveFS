@@ -12,7 +12,6 @@
 #include <memory>
 #include <atomic>
 #include <boost/compute/detail/lru_cache.hpp>
-
 #include "DownloadBuffer.h"
 std::string getRFC3339StringFromTime(const struct timespec &time);
 struct timespec getTimeFromRFC3339String(std::string_view str_date);

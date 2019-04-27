@@ -11,11 +11,11 @@ namespace DriveFS {
         _Object* _obj;
         _lockObject(_Object * obj): _obj(obj){
 //            LOG(INFO) << "locking " << obj->getId();
-            _obj->m_event.wait();
+            _obj->_mutex.lock();
         }
         ~_lockObject(){
 //            LOG(INFO) << "unlocking " << _obj->getId();
-            _obj->m_event.signal();
+            _obj->_mutex.unlock();
         }
     };
 
