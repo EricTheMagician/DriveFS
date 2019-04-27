@@ -225,17 +225,20 @@ int main(int argc, char **argv) {
     }
 
     SFAsync([&account]() {
-        try {
-            LOG(INFO) << "Maximum cache disk size is " << DriveFS::FileIO::maxCacheOnDisk / 1024.0 / 1024.0 / 1024.0
-                      << " GB";
-            DriveFS::FileIO::checkCacheSize();
-            LOG(INFO) << "Current size of cache is "
-                      << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
-        }
-        catch (std::exception &e) {
-            LOG(ERROR) << "There was an error with trying to calculate the initial size of the cache"
-                       << "\n"
-                       << e.what();
+        while(true){
+            try {
+                LOG(INFO) << "Maximum cache disk size is " << DriveFS::FileIO::maxCacheOnDisk / 1024.0 / 1024.0 / 1024.0
+                          << " GB";
+                DriveFS::FileIO::checkCacheSize();
+                LOG(INFO) << "Current size of cache is "
+                          << ((double) DriveFS::FileIO::getDiskCacheSize()) / 1024.0 / 1024.0 / 1024.0 << " GB";
+                return;
+            }
+            catch (std::exception &e) {
+                LOG(ERROR) << "There was an error with trying to calculate the initial size of the cache"
+                           << "\n"
+                           << e.what();
+            }
         }
     });
 

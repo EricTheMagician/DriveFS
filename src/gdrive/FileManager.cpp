@@ -8,8 +8,8 @@
 
 
 namespace DriveFS::FileManager{
-    boost::compute::detail::lru_cache<ino_t, GDriveObject> inodeToObject(1024);
-    boost::compute::detail::lru_cache<std::string, GDriveObject> idToObject(1024);
+    boost::compute::detail::lru_cache<ino_t, GDriveObject> inodeToObject(40960);
+    boost::compute::detail::lru_cache<std::string, GDriveObject> idToObject(40960);
     void cleanUpOnExit(){
         DriveFS::FileManager::inodeToObject.clear();
         DriveFS::FileManager::idToObject.clear();
