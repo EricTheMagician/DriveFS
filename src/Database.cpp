@@ -2,49 +2,48 @@
 #include <unistd.h>
 db_handle_t::DatabasePool db_handle_t::pool{};
 std::string db_handle_t::DatabasePool::s_uri;
-db_handle_t::db_handle_t(): c(pool.getConnection()), w(new pqxx::work(*c)){
+db_handle_t::db_handle_t(): c(pool.getConnection()), nt(nullptr), w(nullptr){
 };
 
 //db_handle_t::db_handle_t(db_handle_t const  & that ){
 //
 //}
 pqxx::work* db_handle_t::getWork(){
-//    if(w != nullptr){
-//        return dynamic_cast<pqxx::work*>(w);
-//    }
+    if(w != nullptr)
+        return w;
 
-//    w = new pqxx::work(*c);
-
-//    return dynamic_cast<pqxx::work*>(w);
+    w = new pqxx::work(*c);
     return w;
 }
 
 
-/*
 pqxx::nontransaction* db_handle_t::getTransaction(){
-    if(w != nullptr){
-        return dynamic_cast<pqxx::nontransaction*>(w);
+    if(nt != nullptr){
+        return nt;
     }
 
-    w = new pqxx::nontransaction(*c);
+    nt = new pqxx::nontransaction(*c);
 
-    return dynamic_cast<pqxx::nontransaction*>(w);
+    return nt;
 
 }
-*/
 
 db_handle_t::db_handle_t(db_handle_t &&that):
-    c(that.c), w(that.w)
+    c(that.c), w(that.w), nt(that.nt)
 {
     that.c = nullptr;
     that.w = nullptr;
+    that.nt = nullptr;
 }
 
 db_handle_t::~db_handle_t(){
-    pool.releaseConnection(c);
     if(w!= nullptr){
         delete w;
     }
+    if(nt!= nullptr){
+        delete nt;
+    }
+    pool.releaseConnection(c);
 }
 
 

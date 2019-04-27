@@ -274,7 +274,7 @@ namespace DriveFS {
 
     void Account::resumeUploadsOnStartup(){
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
 
         std::string sql = "SELECT inode, uploadUrl FROM " DATABASEDATA " WHERE "
                 "mimeType NOT LIKE 'application/vnd.google-apps.%' AND "
@@ -283,11 +283,9 @@ namespace DriveFS {
         pqxx::result results;
         try{
             results = w->exec(sql);
-            w->commit();
         }catch(std::exception &e){
             LOG(ERROR) << e.what();
             LOG(ERROR) << sql;
-            w->commit();
             return;
         }
 
@@ -343,7 +341,6 @@ namespace DriveFS {
             << w.esc(m_refresh_token) << "');";
         LOG(INFO) << sql.str();
         w.exec(sql);
-        w.commit();
 
 //        SFAsync(&Account::background_update, this, std::string(""));
 //        background_update("");
@@ -352,7 +349,7 @@ namespace DriveFS {
     Account Account::getAccount(const std::string &suri) {
         LOG(TRACE) << "Getting Account";
         db_handle_t db;
-        pqxx::work *w = db.getWork();
+        auto *w = db.getTransaction();
         std::string at, rt;
         try {
             std::string sql =
@@ -365,7 +362,6 @@ namespace DriveFS {
             pqxx::row rt_ = w->exec1(sql);
             at = at_[0].c_str();
             rt = rt_[0].c_str();
-            w->commit();
         }catch(std::exception &e){
             LOG(ERROR) << e.what();
         }
@@ -593,12 +589,18 @@ where c.column_b = t.column_b;
                                       "name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
                                       "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,createdTime=EXCLUDED.createdTime";
 
+
+                        db_handle_t d;
+                        auto w_ = d.getWork();
                         try {
-                            w->exec(sql_insert);
+                            w_->exec(sql_insert);
+                            w_->commit();
                         }catch(pqxx::sql_error &e){
                             LOG(INFO) << e.what();
                             LOG(DEBUG) << sql_insert;
+                            w_->abort();
                         }
+
 
                     }
                     if (!not_hasItemsToDelete) {
@@ -606,12 +608,17 @@ where c.column_b = t.column_b;
 //                                      " ON CONFLICT (id) DO UPDATE SET "
 //                                      "trashed=EXCLUDED.trashed";
 
+                        db_handle_t d;
+                        auto w_ = d.getWork();
                         try {
-                            w->exec(sql_delete);
+                            w_->exec(sql_delete);
+                            w_->commit();
                         }catch(pqxx::sql_error &e){
                             LOG(INFO) << e.what();
                             LOG(DEBUG) << sql_delete;
+                            w_->abort();
                         }
+
                     }
 
 
@@ -625,12 +632,15 @@ where c.column_b = t.column_b;
                     sql_insert += "' AND id='";
                     sql_insert += teamDriveId.empty() ? "root" : teamDriveId;
                     sql_insert += "'";
-
+                    db_handle_t d;
+                    auto w_ = d.getWork();
                     try {
-                        w->exec(sql_insert);
+                        w_->exec(sql_insert);
+                        w_->commit();
                     }catch(pqxx::sql_error &e){
                         LOG(INFO) << e.what();
                         LOG(DEBUG) << sql_insert;
+                        w_->abort();
                     }
 
                     for(auto const &objectId: objectToInvalidate){
@@ -641,8 +651,8 @@ where c.column_b = t.column_b;
                     }
 
                 }
-                w->commit();
                 if (hasNextPageTokenField) {
+                    w->abort();
                     continue;
                 }
 
@@ -656,6 +666,7 @@ where c.column_b = t.column_b;
                 LOG(FATAL) << e.sqlstate();
                 continue;
             }catch (std::exception &e) {
+                LOG(INFO) << e.what();
                 LOG(FATAL) << e.what();
                 continue;
             }
@@ -987,8 +998,14 @@ where c.column_b = t.column_b;
                     << "', '" << (teamDriveId.empty() ? "root" : std::string(teamDriveId))
                     << "', '" << w->esc(newStartPageToken)
                     << "');";
-                w->exec(sql);
-                w->commit();
+                try{
+                    w->exec(sql);
+                    w->commit();
+                }catch(std::exception &e){
+                    w->abort();
+                    LOG(ERROR) << e.what();
+                    LOG(ERROR) << sql.str();
+                }
             }
 
             return "";
@@ -1004,9 +1021,8 @@ where c.column_b = t.column_b;
             db_handle_t db;
             std::string sql;
             sql.reserve(256000);
-            sql += "INSERT INTO ";
-            sql += DATABASEDATA;
-            sql +="(id,name,parents,mimeType,md5Checksum,"
+            sql += "INSERT INTO " DATABASEDATA
+                 "(id,name,parents,mimeType,md5Checksum,"
                   "size,"
                   "isTrashable,canRename,canDownload,"
                   "trashed,modifiedTime,createdTime, version, inode,"
@@ -1021,15 +1037,21 @@ where c.column_b = t.column_b;
             }
             sql += " ON CONFLICT (id) DO UPDATE SET parents=EXCLUDED.parents, name=EXCLUDED.name, md5Checksum=EXCLUDED.md5Checksum,"
                    "trashed=EXCLUDED.trashed,modifiedTime=EXCLUDED.modifiedTime,createdTime=EXCLUDED.createdTime";
-            w->exec(sql);
-            w->commit();
+            try{
+                w->exec(sql);
+                w->commit();
+            }catch(std::exception &e){
+                LOG(ERROR) << e.what();
+                LOG(ERROR) << sql;
+                w->abort();
+            }
 
         }
     }
 
     void Account::setMaximumInodeFromDatabase(){
         db_handle_t db;
-        pqxx::work *w = db.getWork();
+        auto *w = db.getTransaction();
 
         pqxx::row result = w->exec1("select max(inode) from " DATABASEDATA);
         this->inode_count = result[0].as<ino_t>();
@@ -1043,15 +1065,21 @@ where c.column_b = t.column_b;
         }
 
         db_handle_t db;
-        pqxx::work *w = db.getWork();
+        auto *w = db.getTransaction();
 
         // check database first
         {
             std::string sql = "SELECT id FROM " DATABASEDATA " WHERE name='_gdrive_root_name_'";
-            pqxx::result result = w->exec(sql);
-            if (result.size() == 1) {
-                m_rootFolderId = result[0][0].c_str();
-                return m_rootFolderId;
+            try{
+                pqxx::result result = w->exec(sql);
+                if (result.size() == 1) {
+                    m_rootFolderId = result[0][0].c_str();
+                    return m_rootFolderId;
+                }
+
+            }catch(std::exception &e){
+                LOG(ERROR) << e.what();
+                LOG(ERROR) << sql;
             }
         }
 
@@ -1095,7 +1123,6 @@ where c.column_b = t.column_b;
             pqxx::work *w = db.getWork();
             w->exec(sql);
             w->exec(sql2);
-            w->commit();
             return m_rootFolderId;
 
         }
@@ -1169,8 +1196,14 @@ where c.column_b = t.column_b;
             }
 
             sql << " ON CONFLICT (id) DO NOTHING";
-            w->exec(sql);
-            w->commit();
+            try{
+                w->exec(sql);
+                w->commit();
+            }catch(std::exception &e){
+                w->abort();
+                LOG(ERROR) << e.what();
+                LOG(ERROR) << sql.str();
+            }
 
             std::string nextPageToken = "";
             // get the list of all files and folders in the team drives if it has not yet been fetched
@@ -1324,8 +1357,14 @@ where c.column_b = t.column_b;
                 sql += std::to_string(obj.getInode());
                 sql += ",-1,-1,-1)";
                 LOG(INFO) << sql;
-                w->exec(sql);
-                w->commit();
+                try{
+                    w->exec(sql);
+                    w->commit();
+                }catch(std::exception &e){
+                    w->abort();
+                    LOG(ERROR) << e.what();
+                    LOG(ERROR) << sql;
+                }
             } else {
                 return nullptr;
             }
@@ -1373,6 +1412,7 @@ where c.column_b = t.column_b;
             w->commit();
             return true;
         }catch(std::exception &e){
+            w->abort();
             LOG(ERROR) << e.what();
             return false;
         }
@@ -1441,11 +1481,12 @@ where c.column_b = t.column_b;
 
         try{
             w->exec(sql);
+            w->commit();
         }catch(std::exception &e){
+            w->abort();
             LOG(ERROR) << sql;
             LOG(FATAL) << "There was an error with inserting file in to the database: " << e.what();
         }
-        w->commit();
 
         file->m_event.signal();
     }
@@ -1481,9 +1522,13 @@ where c.column_b = t.column_b;
             sql += "createdTime=EXCLUDED.createdTime"
                     ",size=EXCLUDED.size";
 
-            w->exec(sql);
-            w->commit();
-
+            try{
+                w->exec(sql);
+                w->commit();
+            }catch(std::exception &e){
+                w->abort();
+                LOG(ERROR) << e.what();
+            }
             file->m_event.signal();
         }
 
@@ -1582,6 +1627,7 @@ where c.column_b = t.column_b;
                 w->exec(sql);
                 w->commit();
             }catch(std::exception &e){
+                w->abort();
                 LOG(ERROR) << e.what();
                 LOG(DEBUG) << sql;
             }
@@ -1787,8 +1833,7 @@ where c.column_b = t.column_b;
     void Account::invalidateParentEntries(const DriveFS::GDriveObject &obj) {
         _Object::trash(obj);
         db_handle_t db;
-        pqxx::work *work = db.getWork();
-        obj->m_event.wait();
+        auto *work = db.getTransaction();
 
         std::string sql;
         sql.reserve(256);
@@ -1797,10 +1842,7 @@ where c.column_b = t.column_b;
         sql += " WHERE inode=";
         sql += obj->getInode();
 
-
-
         invalidateParentEntries(work->exec(sql));
-
     }
 
     void Account::invalidateParentEntries(std::string const &id) {
@@ -1809,7 +1851,7 @@ where c.column_b = t.column_b;
             return;
         }
         db_handle_t db;
-        pqxx::work *work = db.getWork();
+        auto  *work = db.getTransaction();
 //        std::string sql;
 //        sql.reserve(256);
 //        sql += "SELECT array_to_string(parents, ',', '') from ";
@@ -1846,11 +1888,9 @@ where c.column_b = t.column_b;
 
         try {
             invalidateParentEntries(work->exec(sql));
-            work->commit();
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << e.what();
             LOG(DEBUG) << sql;
-            work->commit();
         }
     }
 

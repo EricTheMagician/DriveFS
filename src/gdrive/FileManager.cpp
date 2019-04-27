@@ -21,15 +21,14 @@ namespace DriveFS::FileManager{
         static boost::recursive_mutex  lruMutex;
         static std::vector<std::string> getParentsFromDB(std::string const &id){
             db_handle_t db;
-            auto w = db.getWork();
+            auto nt = db.getWork();
             std::string sql;
             sql.reserve(512);
             snprintf(sql.data(), 512, "SELECT "
                    "parents "
                    " FROM " DATABASEDATA 
                    " WHERE trashed=false AND id='%s'", id.c_str());
-            pqxx::result sql_results = w->exec(sql);
-            w->commit();
+            pqxx::result sql_results = nt->exec(sql);
 
             std::vector<std::string> results;
             if(sql_results.size() > 0) {
@@ -54,18 +53,17 @@ namespace DriveFS::FileManager{
 
     std::vector<GDriveObject> getChildren(std::string const &id){
         db_handle_t db;
-        auto w = db.getWork();
+        auto nt = db.getTransaction();
         std::string sql;
-        sql.reserve(2048);
-        snprintf(sql.data(), 2048,
+        sql.reserve(512);
+        snprintf(sql.data(), 512,
                "SELECT "
                "inode "
                " FROM "  DATABASEDATA 
                " WHERE trashed=false AND '%s'=ALL(parents) AND name not like '%%/%%'",
-                 w->esc(id).c_str()
+                 nt->esc(id).c_str()
                  );
-        pqxx::result result = w->exec(sql);
-        w->commit();
+        pqxx::result result = nt->exec(sql);
         std::vector<GDriveObject> results;
         results.reserve(result.size());
         for(const pqxx::row &row: result){
@@ -98,21 +96,20 @@ namespace DriveFS::FileManager{
 
     GDriveObject fromParentIdAndName(const std::string &id, char const* name, bool logSqlFailure){
         db_handle_t db;
-        auto w = db.getWork();
+        auto nt = db.getTransaction();
         std::string sql;
         sql.reserve(512);
 
-        snprintf(sql.data(), 512, "SELECT inode FROM "  DATABASEDATA  " WHERE name='%s' and trashed=false and '%s'=all(parents) LIMIT 1", w->esc(name).c_str(), id.c_str());
+        snprintf(sql.data(), 512, "SELECT inode FROM "  DATABASEDATA  " WHERE name='%s' and trashed=false and '%s'=all(parents) LIMIT 1", nt->esc(name).c_str(), id.c_str());
 
         try {
-            pqxx::row result = w->exec1(sql);
+            pqxx::row result = nt->exec1(sql);
             ino_t inode = result[0].as<ino_t>();
-            w->commit();
+            nt->commit();
             return fromInode(inode);
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << "unable to find inode for parent_id " << id
                        << " and child name " << name;
-            w->commit();
             return nullptr;
         }catch(pqxx::unexpected_rows &e){
             if(logSqlFailure) {
@@ -120,11 +117,9 @@ namespace DriveFS::FileManager{
                            << " and child name " << name;
                 LOG(ERROR) << sql;
             }
-            w->commit();
             return nullptr;
         }catch(std::exception &e){
             LOG(ERROR) << e.what();
-            w->commit();
             return nullptr;
         }
 
@@ -142,14 +137,12 @@ namespace DriveFS::FileManager{
         }
 
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
 
         std::string sql;
         sql.reserve(512);
         snprintf(sql.data(), 512, "SELECT 1 FROM " DATABASEDATA " WHERE id='%s'",  w->esc(id).c_str());
-
         pqxx::result result = w->exec(sql);
-        w->commit();
         return result.size() > 0;
 
     }
@@ -163,7 +156,7 @@ namespace DriveFS::FileManager{
         }
 
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
         std::string sql;
         sql.reserve(512);
         snprintf(sql.data(),  512,
@@ -187,7 +180,6 @@ namespace DriveFS::FileManager{
 
         try{
             result = w->exec1(sql);
-            w->commit();
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << e.what();
             LOG(ERROR) << "unable to get object for id " << id;
@@ -233,7 +225,7 @@ namespace DriveFS::FileManager{
         }
 
         db_handle_t db;
-        auto w = db.getWork();
+        auto w = db.getTransaction();
         std::string sql;
         sql.reserve(512);
         snprintf(sql.data(), 512,
@@ -256,7 +248,6 @@ namespace DriveFS::FileManager{
         pqxx::row result {};
         try{
             result = w->exec1(sql);
-            w->commit();
         }catch(pqxx::sql_error &e){
             LOG(ERROR) << e.what();
             LOG(ERROR) << "unable to get object for inode " << inode;
@@ -348,6 +339,7 @@ namespace DriveFS::FileManager{
         } catch (std::exception &e) {
             LOG(ERROR) << "Error marking file as trashed";
             LOG(ERROR) << e.what();
+            w->abort();
         }
 
         return false;

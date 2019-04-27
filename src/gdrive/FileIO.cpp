@@ -70,17 +70,20 @@ void handleReplyData(fuse_req_t req, __no_collision_download__ *item, std::vecto
             *spillOverPreCopy = size;
         }else{
             assert( (size + (*spillOverPreCopy)) == buf->size());
-            struct fuse_bufvec fbuf = FUSE_BUFVEC_INIT(buf->size());
-            fbuf.buf[0].mem = buf->data();
+//            struct fuse_bufvec fbuf = FUSE_BUFVEC_INIT(buf->size());
+//            fbuf.buf[0].mem = buf->data();
 //            fbuf.buf[0].size = buf->size();
-            fuse_reply_data(req, &fbuf, FUSE_BUF_NO_SPLICE);
+//            fuse_reply_data(req, &fbuf, FUSE_BUF_NO_SPLICE);
+            fuse_reply_buf(req, reinterpret_cast<char *>(item->buffer->data()+start),  size);
+
             delete buf;
         }
     }else{
-        struct fuse_bufvec buf = FUSE_BUFVEC_INIT(size);
-        buf.buf[0].mem = item->buffer->data()+start;
+//        struct fuse_bufvec buf = FUSE_BUFVEC_INIT(size);
+//        buf.buf[0].mem = item->buffer->data()+start;
 //        buf.buf[0].size = item->buffer->size()-start;
-        fuse_reply_data(req, &buf, FUSE_BUF_NO_SPLICE);
+//        fuse_reply_data(req, &buf, FUSE_BUF_NO_SPLICE);
+        fuse_reply_buf(req, reinterpret_cast<char *>(item->buffer->data()+start),  size);
     }
 
 }
