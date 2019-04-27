@@ -73,14 +73,14 @@ void handleReplyData(fuse_req_t req, __no_collision_download__ *item, std::vecto
             struct fuse_bufvec fbuf = FUSE_BUFVEC_INIT(buf->size());
             fbuf.buf[0].mem = buf->data();
 //            fbuf.buf[0].size = buf->size();
-            fuse_reply_data(req, &fbuf, FUSE_BUF_SPLICE_MOVE);
+            fuse_reply_data(req, &fbuf, FUSE_BUF_NO_SPLICE);
             delete buf;
         }
     }else{
         struct fuse_bufvec buf = FUSE_BUFVEC_INIT(size);
         buf.buf[0].mem = item->buffer->data()+start;
 //        buf.buf[0].size = item->buffer->size()-start;
-        fuse_reply_data(req, &buf, FUSE_BUF_SPLICE_MOVE);
+        fuse_reply_data(req, &buf, FUSE_BUF_NO_SPLICE);
     }
 
 }
@@ -432,6 +432,9 @@ namespace DriveFS{
                 repliedReq = !spillOver;
             }else{
                 fuse_reply_err(req, EIO);
+                if(spillOver){
+                    delete buffer;
+                }
                 return;
             }
 
@@ -456,17 +459,24 @@ namespace DriveFS{
 //                if ((item = DownloadCache.get(chunkId)) || (item = getFromCache(chunkId)) ){
                 if ( ((item = DownloadCache.get(chunkId))  || (item = getFromCache(chunkId, chunkStart2)) )
                      && (item->buffer != nullptr || (item->wait() && item->buffer != nullptr) )
-                   ) {
-                    if(bufferMatchesExpectedBufferSize(item->buffer->size())){
-                        assert((spillOverPrecopy + size2) <= buffer->size());
-                        handleReplyData(req, item.get(), buffer, size2, 0, spillOver, &spillOverPrecopy);
-                        buffer = nullptr;
-                        repliedReq = true;
+                   )
+                {
+                    if(bufferMatchesExpectedBufferSize(item->buffer->size())){                        
+                        if(chunksToDownload.empty()){
+                            // if the chunks to download is not emptty, this means that haven;t finished downloading the first part and we should wair rather send incomplete data
+                            assert((spillOverPrecopy + size2) <= buffer->size());
+                            handleReplyData(req, item.get(), buffer, size2, 0, spillOver, &spillOverPrecopy);
+                            buffer = nullptr;
+                            repliedReq = true;
+                        }
                     }else{
                         fuse_reply_err(req, EIO);
+                        delete buffer;
                         return;
                     }
-                }  else {
+                }
+                else
+                {
                     chunksToDownload.push_back(chunkNumber2);
                 }
 
