@@ -33,7 +33,11 @@ set(common_src_files
         src/Database.cpp
         src/gdrive/FileManager.cpp
         include/gdrive/FileManager.h
-        src/gdrive/Dedupe.cpp src/gdrive/Dedupe.h)
+        src/gdrive/Dedupe.cpp src/gdrive/Dedupe.h
+        src/lockable.cpp
+        include/lockable.h
+
+        )
 
 # add_executable(${PROJECT_NAME}_encrypted
 #         ${common_src_files}

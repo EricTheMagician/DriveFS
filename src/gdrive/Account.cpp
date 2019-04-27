@@ -1461,7 +1461,7 @@ where c.column_b = t.column_b;
     }
 
     void Account::insertFileToDatabase(GDriveObject file, const std::string &parentId) {
-        file->_mutex.lock();
+        file->lock();
         db_handle_t db;
         auto w = db.getWork();
 
@@ -1488,7 +1488,7 @@ where c.column_b = t.column_b;
             LOG(FATAL) << "There was an error with inserting file in to the database: " << e.what();
         }
 
-        file->_mutex.unlock();
+        file->unlock();
     }
 
     void Account::upsertFileToDatabase(GDriveObject file, const std::vector<std::string> &parentIds) {
@@ -1497,7 +1497,7 @@ where c.column_b = t.column_b;
             auto w = db.getWork();
 //            auto count = data.count(document{} << "id" << file->getId() << finalize);
             bool updateParents = !parentIds.empty();
-            file->_mutex.lock();
+            file->lock();
 
             std::string sql;
             sql.reserve(512);
@@ -1529,7 +1529,7 @@ where c.column_b = t.column_b;
                 w->abort();
                 LOG(ERROR) << e.what();
             }
-            file->_mutex.unlock();
+            file->unlock();
         }
 
     }
@@ -1614,7 +1614,7 @@ where c.column_b = t.column_b;
 
         if (backoff == 0) {
 
-            _lockObject lock(file.get());
+            auto lock(file->getScopeLock());
             db_handle_t db;
             auto w = db.getWork();
 

@@ -34,8 +34,8 @@ namespace DriveFS{
             memset(&e, 0, sizeof(e));
             e.attr = child->attribute;
             e.ino = e.attr.st_ino;
-            e.attr_timeout = 15.0;
-            e.entry_timeout = 15.0;
+            e.attr_timeout = 3600.0;
+            e.entry_timeout = 3600.0;
             e.generation = 1;
             int reply_err = fuse_reply_entry(req, &e);
             while(reply_err != 0){
@@ -94,7 +94,7 @@ namespace DriveFS{
             return;
         }
         {
-            std::lock_guard _lock(file->_mutex);
+            auto _lock{file->getScopeLock()};
             if(to_set & FUSE_SET_ATTR_MODE){
                 file->attribute.st_mode = attr->st_mode;
             }
@@ -146,7 +146,7 @@ namespace DriveFS{
 
     void mkdir(fuse_req_t req, fuse_ino_t parent_ino, const char *name, mode_t mode){
         auto parent = FileManager::fromInode(parent_ino);
-        _lockObject test{parent.get()};
+        ::ScopeLock lock {parent->getScopeLock()};
         GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name, false);
         if (child) {
             LOG(INFO) << "Mkdir with name " << name << " already existed";
@@ -167,8 +167,8 @@ namespace DriveFS{
         memset(&e, 0, sizeof(e));
         e.attr = folder->attribute;
         e.ino = e.attr.st_ino;
-        e.attr_timeout = 15.0;
-        e.entry_timeout = 15.0;
+        e.attr_timeout = 3600.0;
+        e.entry_timeout = 3600.0;
         folder->lookupCount.fetch_add(1, std::memory_order_relaxed);
         LOG(INFO) << "Mkdir with name " << name;
         int reply_err = fuse_reply_entry(req, &e);
@@ -180,12 +180,12 @@ namespace DriveFS{
     void unlink(fuse_req_t req, fuse_ino_t parent_ino, const char *name) {
         auto *account = getAccount(req);
         GDriveObject parent(FileManager::fromInode(parent_ino));
-        parent->_mutex.lock();
+        parent->lock();
         bool signaled = false;
         GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
 
         if(child){
-            parent->_mutex.unlock();
+            parent->unlock();
             signaled = true;
 
             LOG(TRACE) << "Deleting file/folder with name " << name << " and parentId: "  << parent->getId();
@@ -240,7 +240,7 @@ namespace DriveFS{
         }
         GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name);
         if (child) {
-            _lockObject lock { child.get() };
+            auto lock { child->getScopeLock() };
             if (!(FileManager::getChildren(child->getId()).empty())) {
                 int reply_err = fuse_reply_err(req, ENOTEMPTY);
                 while(reply_err != 0){
@@ -473,17 +473,17 @@ namespace DriveFS{
 
         if(current != off) {
             // not current
-            io->m_file->_mutex.lock();
+            io->m_file->lock();
             io->m_event.wait();
 //            memcpy(io->write_buffer2, io->write_buffer, io->last_write_to_buffer);
             std::swap(io->write_buffer, io->write_buffer2);
-            io->m_file->_mutex.unlock();
+            io->m_file->unlock();
             off_t off2 =  io->first_write_to_buffer,
                     end2 = io->last_write_to_buffer;
             SFAsync([io, off2,end2] {
                 fseek(io->m_fp, off2, SEEK_SET);
                 fwrite((char *)io->write_buffer2->data(), sizeof(char), end2, io->m_fp);
-                io->m_file->_mutex.unlock();
+                io->m_file->unlock();
                 io->m_event.signal();
 
             });
@@ -494,12 +494,12 @@ namespace DriveFS{
 
         if(!(off >= start && off+size < end)) {
 //        }else {
-            io->m_file->_mutex.lock();
+            io->m_file->lock();
             io->m_event.wait();
 
 //            memcpy(io->write_buffer2, io->write_buffer, io->last_write_to_buffer);
             std::swap(io->write_buffer2, io->write_buffer);
-            io->m_file->_mutex.unlock();
+            io->m_file->unlock();
             off_t off2 =  io->first_write_to_buffer,
                     end2 = io->last_write_to_buffer;
             SFAsync([io, off2,end2] {
@@ -513,7 +513,7 @@ namespace DriveFS{
 
         }
         {
-            std::lock_guard lock(io->m_file->_mutex);
+            auto lock{ io->m_file->getScopeLock()};
             memcpy(io->write_buffer->data() + off - io->first_write_to_buffer, buf, size);
         }
 
@@ -600,7 +600,7 @@ namespace DriveFS{
             }
             return;
         }
-        _lockObject test { object.get() };
+        auto lock { object->getScopeLock() };
         std::vector<GDriveObject> children = FileManager::getChildren(object->getId());
 
         FolderIO::shared_ptr io = new FolderIO(req, children.size());
@@ -814,7 +814,7 @@ namespace DriveFS{
             }
             return;
         }
-        _lockObject test { parent.get() };
+        auto lock{ parent->getScopeLock() };
         GDriveObject child = FileManager::fromParentIdAndName(parent->getId(), name, false);
         if (child) {
             LOG(INFO) << "When creating file with name " << name << " parentId " << parent->getId() << " already existed";
@@ -838,8 +838,8 @@ namespace DriveFS{
         e.ino = child->attribute.st_ino;
         e.generation = 0; //child->attribute.;
         e.attr = child->attribute;
-        e.attr_timeout = 15;
-        e.entry_timeout = 15;
+        e.attr_timeout = 3600;
+        e.entry_timeout = 3600;
 
         account->insertFileToDatabase(child, parent->getId());
         FileManager::insertObjectToMemoryMap(child);

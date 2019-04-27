@@ -417,8 +417,8 @@ namespace DriveFS{
         // serialize the access to the cloud on a per file basis
         auto localFile = m_file; // keep a hard reference to m_file and use this localFile as "this" can be deleted due to the asychronisity of the code
         _Object *file = m_file.get();
-        file->_mutex.lock();
-        file->_mutex.unlock();
+        file->lock();
+        file->unlock();
 
 
         std::vector<unsigned char> *buffer = [&spillOver, &_size]() -> std::vector<unsigned char>*{
@@ -521,7 +521,7 @@ namespace DriveFS{
         }
 
         if(!chunksToDownload.empty()){
-            file->_mutex.lock();
+            auto lock{ file->getScopeLock()};
             
 //            file->create_heap_handles(block_download_size);
             for (auto _chunkNumber: chunksToDownload) {
@@ -591,9 +591,9 @@ namespace DriveFS{
                         }
                 }
             }
+
             item.reset();
             std::atomic_thread_fence(std::memory_order_release);
-            file->_mutex.unlock();
 
 //        mtxDownloadInsert.unlock();
         }
@@ -742,8 +742,8 @@ namespace DriveFS{
         }
 
         // make sure that the file is no longer setting attribute
-        m_file->_mutex.lock();
-        m_file->_mutex.unlock();
+        m_file->lock();
+        m_file->unlock();
         LOG(INFO) << "About to upload file \""<< m_file->getName() << "\"";
 
         bool status = m_account->upload(uploadUrl, uploadFileName, m_file->getFileSize());
@@ -1235,6 +1235,7 @@ namespace DriveFS{
 
         }catch(std::exception &e) {
             LOG(ERROR) << e.what();
+            w->abort();
         }
 
         incrementCacheSize(size);

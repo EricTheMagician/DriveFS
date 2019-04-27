@@ -14,9 +14,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <atomic>
-#include <mutex>
+#include "lockable.h"
 
-class File{
+class File: public Lockable{
 
 public:
     static struct fuse_session *session;
@@ -36,8 +36,6 @@ public:
 //    void create_heap_handles(size_t write_buffer_size);
 public:
     std::atomic<int64_t> lookupCount; // for filesystem lookup count
-
-    std::recursive_mutex _mutex;
 protected:
     std::string m_name;
 
