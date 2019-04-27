@@ -74,7 +74,7 @@ void handleReplyData(fuse_req_t req, __no_collision_download__ *item, std::vecto
 //            fbuf.buf[0].mem = buf->data();
 //            fbuf.buf[0].size = buf->size();
 //            fuse_reply_data(req, &fbuf, FUSE_BUF_NO_SPLICE);
-            fuse_reply_buf(req, reinterpret_cast<char *>(item->buffer->data()+start),  size);
+            fuse_reply_buf(req, reinterpret_cast<char *>(buf->data()),  size);
 
             delete buf;
         }
