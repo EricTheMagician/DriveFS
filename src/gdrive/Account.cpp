@@ -1123,6 +1123,7 @@ where c.column_b = t.column_b;
             pqxx::work *w = db.getWork();
             w->exec(sql);
             w->exec(sql2);
+            w->commit();
             return m_rootFolderId;
 
         }
