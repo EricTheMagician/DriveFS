@@ -74,7 +74,7 @@ void handleReplyData(fuse_req_t req, __no_collision_download__ *item, std::vecto
 //            fbuf.buf[0].mem = buf->data();
 //            fbuf.buf[0].size = buf->size();
 //            fuse_reply_data(req, &fbuf, FUSE_BUF_NO_SPLICE);
-            fuse_reply_buf(req, reinterpret_cast<char *>(buf->data()),  size);
+            fuse_reply_buf(req, reinterpret_cast<char *>(buf->data()),  buf->size());
 
             delete buf;
         }
@@ -431,7 +431,7 @@ namespace DriveFS{
              && (item->buffer != nullptr || (item->wait() && item->buffer != nullptr) )
            ) {
             if(bufferMatchesExpectedBufferSize(item->buffer->size())){
-                handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
+                 handleReplyData(req, item.get(), buffer, size, off % FileIO::block_download_size, spillOver, &spillOverPrecopy);
                 repliedReq = !spillOver;
             }else{
                 fuse_reply_err(req, EIO);
