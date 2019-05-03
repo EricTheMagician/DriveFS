@@ -293,18 +293,7 @@ namespace DriveFS{
     }
 
     void _Object::trash(){
-#warning todo move to file manager
-//        if(lookupCount.load(std::memory_order_acquire) == 0){
-//            insertEvent.wait();
-//            inodeToObject.insert(this->attribute.st_ino, nullptr);
-//            idToObject.insert(this->m_id, nullptr);
-//            insertEvent.signal();
-//        }
-//        trashed = true;
-//
-//        if(!getIsUploaded()){
-//            FileIO::deleteFileFromUploadCache(getId());
-//        }
+        trashed = true;
     }
 
     void _Object::trash(GDriveObject file){
