@@ -553,9 +553,9 @@ namespace DriveFS{
     }
 
     void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-            FileIO::shared_ptr io { (FileIO *) fi->fh};
+            FileIO* io =  (FileIO *) fi->fh;
 
-            if(io.get() == nullptr){
+            if(io == nullptr){
                 int reply_err = fuse_reply_err(req, EIO);
                 while(reply_err != 0){
                     LOG(ERROR) << "Threre was an error replying";
@@ -563,6 +563,12 @@ namespace DriveFS{
                 }
                 return;
             }
+
+            do{
+                usleep(15000);
+            }while(io->getReferenceCount() > 1);
+
+
             fi->fh = 0;
             Account *account = getAccount(req);
 
@@ -577,7 +583,7 @@ namespace DriveFS{
                 std::vector<std::string> pids{};
                 auto file = FileManager::fromInode(ino);
                 account->upsertFileToDatabase(file, pids);
-                //sleep for 3 seconds to make sure that the filesystem has not decided to delete the file.
+                LOG(INFO) << "Releasing file that needs upload: " << file->getName();
                 fi->fh = 0;
                 if(file) {
                     io->upload(true);
