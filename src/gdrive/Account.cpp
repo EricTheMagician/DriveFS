@@ -1623,7 +1623,8 @@ where c.column_b = t.column_b;
             sql.reserve(256);
             sql += "UPDATE " DATABASEDATA " SET uploadURL='";
             sql += w->esc(location);
-            sql += "'";
+            sql += "' WHERE inode=";
+            sql += std::to_string(file->getInode()) ;
             try {
                 w->exec(sql);
                 w->commit();
