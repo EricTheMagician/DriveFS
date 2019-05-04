@@ -1,11 +1,12 @@
 #include "gdrive/FileManager.h"
 #include "Database.h"
 #include "gdrive/Account.h"
+#include "lri_map.h"
 #include <pqxx/pqxx>
 #include <cpprest/json.h>
 #include <boost/thread/recursive_mutex.hpp>
 #include <boost/thread/shared_mutex.hpp>
-
+#include <boost/container/flat_map.hpp>
 
 namespace DriveFS::FileManager{
     boost::compute::detail::lru_cache<ino_t, GDriveObject> inodeToObject(40960);
@@ -18,6 +19,8 @@ namespace DriveFS::FileManager{
 
     PriorityCache DownloadCache(1,1);
     namespace detail {
+        using childMap_t = boost::container::flat_map<std::string, GDriveObject>;
+        static ::LRIMap <std::string, childMap_t> childMap{128};
         static boost::recursive_mutex  lruMutex;
         static std::vector<std::string> getParentsFromDB(std::string const &id){
             db_handle_t db;
@@ -52,27 +55,78 @@ namespace DriveFS::FileManager{
 
 
     std::vector<GDriveObject> getChildren(std::string const &id){
+        std::lock_guard lock(detail::lruMutex);
+        if (auto maybeMap = detail::childMap.get(id)){
+            auto const & cMap = *maybeMap;
+            std::vector<GDriveObject> children;
+            children.reserve(cMap.size());
+            for( auto const & child : cMap){
+                children.push_back(child.second);
+            }
+            return children;
+        }
         db_handle_t db;
         auto nt = db.getTransaction();
         std::string sql;
         sql.reserve(512);
         snprintf(sql.data(), 512,
-               "SELECT "
-               "inode "
-               " FROM "  DATABASEDATA 
-               " WHERE trashed=false AND '%s'=ALL(parents) AND name not like '%%/%%'",
+               "WITH CHILDREN AS "
+               "(SELECT inode FROM " DATABASEDATA " WHERE trashed=false AND '%s'=ALL(parents) AND name not like '%%/%%')"  // name does not contain forward slash
+                 "SELECT "
+                      "name,"            // 0
+                      "size,"             // 1
+                      "mimeType,"         // 2
+                      "canDownload,"      // 3
+                      "modifiedTime,"     // 4
+                      "createdTime,"      // 5
+                      "id,"               // 6
+                      "md5Checksum,"      // 7
+                      "uid,"      // 8
+                      "gid,"      // 9
+                      "mode,"      // 10
+                      "trashed,"  // 11
+                      "inode" // 12
+                 " FROM " DATABASEDATA  " WHERE inode in (SELECT inode FROM CHILDREN)",
                  nt->esc(id).c_str()
                  );
-        pqxx::result result = nt->exec(sql);
-        std::vector<GDriveObject> results;
-        results.reserve(result.size());
-        for(const pqxx::row &row: result){
-            if(GDriveObject gd = fromInode(row[0].as<ino_t>())){
-                results.push_back(std::move(gd));
+        pqxx::result sql_results = nt->exec(sql);
+        std::vector<GDriveObject> children;
+        children.reserve(sql_results.size());
+        detail::childMap_t childMap;
+        for(const pqxx::row &result: sql_results){
+            ino_t inode = result[12].as<ino_t>();
+            auto maybe_object = inodeToObject.get(inode);
+            if(maybe_object){
+                auto child = *maybe_object;
+                children.push_back(child);
+                childMap[child->getName()] = child;
+                continue;
             }
 
+            std::string child_id = result[6].as<std::string>();
+
+            GDriveObject so = std::make_shared<_Object>(inode,                                  // inode
+                                                        child_id,                                          // id
+                                                        result[0].as<std::string>(),                            // name
+                                                        result[4].as<std::string>(),                            // modifiedDate
+                                                        result[5].as<std::string>(),                            // createdDate
+                                                        result[2].as<std::string>(),                            // mimeType
+                                                        result[1].is_null() ? 0  : result[1].as<size_t>(),      // size
+                                                        result[7].is_null() ? "" : result[7].as<std::string>(), // md5
+                                                        result[8].as<int>(),   // uid
+                                                        result[9].as<int>(),   // gid
+                                                        result[10].as<int>(),   // mode
+                                                        ( result[11].is_null() ? false: result[11].as<bool>()) // trashed
+
+            );
+
+            inodeToObject.insert(inode, so);
+            idToObject.insert(child_id, so);
+            childMap[so->getName()] = so;
+            children.push_back(std::move(so));
         }
-        return results;
+        detail::childMap.set(id, childMap);
+        return children;
     }
 
     std::vector<GDriveObject> getParents(std::string const &id){
@@ -95,6 +149,12 @@ namespace DriveFS::FileManager{
     }
 
     GDriveObject fromParentIdAndName(const std::string &id, char const* name, bool logSqlFailure){
+        if(auto maybeMap = detail::childMap.get(id)){
+            auto iter = maybeMap->find( name );
+            if(iter != maybeMap->end()){
+                    return iter->second;
+            }
+        }
         db_handle_t db;
         auto nt = db.getTransaction();
         std::string sql;

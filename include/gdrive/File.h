@@ -37,7 +37,7 @@ namespace DriveFS {
         _Object(ino_t ino, const std::string &id, const char *name, mode_t mode, bool isFile);
         _Object(const DriveFS::_Object&);
         _Object(DriveFS::_Object&&);
-        virtual ~_Object();
+        virtual ~_Object() = default;
     public:
         static AutoResetEvent insertEvent;
 
