@@ -297,6 +297,8 @@ namespace DriveFS{
         if(newParents){
             newParent = FileManager::fromInode(newparent_ino);
             auto oldChild = FileManager::fromParentIdAndName(newParent->getId(), name);
+            FileManager::resetChildrenBuffer(parent->getId());
+            FileManager::resetChildrenBuffer(newParent->getId());
             if(oldChild){
 #if defined(USE_FUSE3) && defined(RENAME_NOREPLACE)
                 if(RENAME_NOREPLACE & flags){
@@ -318,6 +320,7 @@ namespace DriveFS{
         }
 
         if(child->getName() != newname) {
+            FileManager::resetChildrenBuffer(parent->getId());
             LOG(INFO) << "Renaming: file from ("<< name<<") to " << newname;
             child->setName(newname);
         }

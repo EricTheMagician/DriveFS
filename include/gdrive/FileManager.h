@@ -12,6 +12,7 @@ namespace DriveFS::FileManager{
     extern GDriveObject fromId(std::string const &id);
     extern GDriveObject fromInode(ino_t inode);
     extern GDriveObject fromParentIdAndName(std::string const &id, char const* name, bool logSqlFailure=true);
+    extern void resetChildrenBuffer(std::string const &parent_id);
     extern std::vector<GDriveObject> getChildren(const std::string &parent_id);
     extern std::vector<GDriveObject> getParents(const std::string &child_id);
     extern std::vector<std::string> getParentIds(const std::string &child_id);

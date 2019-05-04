@@ -23,7 +23,7 @@ using namespace web::http;
 using namespace web::http::client;
 
 static boost::asio::thread_pool *parseFilesAndFolderThreadPool;
-namespace DriveFS {
+amespace DriveFS {
 
     namespace detail{
         void appendSqlRepresentationFromJson(std::string *_sql, json::value file, ino_t nextInode, pqxx::work *w, bool *wasFirst, std::string parentId= ""){
@@ -692,8 +692,12 @@ where c.column_b = t.column_b;
     }
 
     void Account::invalidateId(std::string const &id){
-        if(FileManager::hasId(id, true))
-            invalidateInode(FileManager::fromId(id)->getInode());
+        if(FileManager::hasId(id, true)){
+            auto object = FileManager::fromId(id)->getInode();
+            invalidateInode(object);
+            if( object->getIsFolder() )
+                FileManager::resetChildrenBuffer(object->getId());
+        }
     }
 
     void Account::linkParentsAndChildren() {

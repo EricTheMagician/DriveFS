@@ -53,6 +53,9 @@ namespace DriveFS::FileManager{
         }
     };
 
+    void resetChildrenBuffer( std::string const & parent_id ){
+        detail::childMap.removeKey( parent_id );
+    }
 
     std::vector<GDriveObject> getChildren(std::string const &id){
         std::lock_guard lock(detail::lruMutex);

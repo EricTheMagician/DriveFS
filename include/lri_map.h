@@ -40,7 +40,7 @@ public:
     
     void removeKey( keyType const & key){
         auto lock = this->getScopeLock();
-        data.erase( data->find(key));
+        data.erase( data.find(key));
     }
 
 private:
