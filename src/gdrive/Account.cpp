@@ -23,7 +23,7 @@ using namespace web::http;
 using namespace web::http::client;
 
 static boost::asio::thread_pool *parseFilesAndFolderThreadPool;
-amespace DriveFS {
+namespace DriveFS {
 
     namespace detail{
         void appendSqlRepresentationFromJson(std::string *_sql, json::value file, ino_t nextInode, pqxx::work *w, bool *wasFirst, std::string parentId= ""){
