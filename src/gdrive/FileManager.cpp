@@ -60,7 +60,7 @@ namespace DriveFS::FileManager{
     std::vector<GDriveObject> getChildren(std::string const &id){
         std::lock_guard lock(detail::lruMutex);
         if (auto maybeMap = detail::childMap.get(id)){
-            auto const & cMap = *maybeMap;
+            auto const cMap = *maybeMap;
             std::vector<GDriveObject> children;
             children.reserve(cMap.size());
             for( auto const & child : cMap){

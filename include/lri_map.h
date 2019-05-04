@@ -18,20 +18,22 @@ class LRIMap: Lockable
 public:
     LRIMap(size_t nElements): insertionList(nElements){}
 
-    valueType* get(keyType const & key) noexcept
+    std::optional<valueType> get(keyType const & key) noexcept
     {
         auto lock = this->getScopeLock();
         auto iter = data.find(key);
         if(iter == data.end())
-            return nullptr;
-        return &iter->second;
+            return std::nullopt;
+        return iter->second;
 
     }
     void set(keyType const &key, valueType const & value){
         auto lock = this->getScopeLock();
         if( insertionList.full()){
             const keyType& key = insertionList.front();
-            data.erase(data.find(key));
+            auto iter = data.find(key);
+            if(iter != data.end())
+                data.erase(iter);
             insertionList.pop_front();
         }
         insertionList.push_back(key);
@@ -40,7 +42,9 @@ public:
     
     void removeKey( keyType const & key){
         auto lock = this->getScopeLock();
-        data.erase( data.find(key));
+        auto iter =  data.find(key);
+        if(iter != data.end())
+            data.erase(iter);
     }
 
 private:
