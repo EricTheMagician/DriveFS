@@ -693,8 +693,8 @@ where c.column_b = t.column_b;
 
     void Account::invalidateId(std::string const &id){
         if(FileManager::hasId(id, true)){
-            auto object = FileManager::fromId(id)->getInode();
-            invalidateInode(object);
+            auto object = FileManager::fromId(id);
+            invalidateInode(object->getInode());
             if( object->getIsFolder() )
                 FileManager::resetChildrenBuffer(object->getId());
         }
