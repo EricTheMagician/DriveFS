@@ -76,16 +76,18 @@ public:
   }
 
 #if FUSE_USE_VERSION < 30
-  struct fuse_chan *fuse_channel;
+  struct fuse_chan *fuse_channel = nullptr;
 #endif
-  struct fuse_session *fuse_session;
+  struct fuse_session *fuse_session = nullptr;
 
   void inline invalidateInode(ino_t inode)
-  {
+  {     
 #if FUSE_USE_VERSION >= 30
-    fuse_lowlevel_notify_inval_inode(this->fuse_session, inode, 0, 0);
+    if(fuse_session != nullptr)
+        fuse_lowlevel_notify_inval_inode(this->fuse_session, inode, 0, 0);
 #else
-    fuse_lowlevel_notify_inval_inode(this->fuse_channel, inode, 0, 0);
+    if(fuse_channel != nulptr)
+        fuse_lowlevel_notify_inval_inode(this->fuse_channel, inode, 0, 0);
 #endif
   }
   void inline invalidateEntry(ino_t parent_inode, const std::string &name)

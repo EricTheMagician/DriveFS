@@ -289,8 +289,6 @@ namespace DriveFS{
 
     }
 */
-    _Object::~_Object(){
-    }
 
     void _Object::trash(){
         trashed = true;

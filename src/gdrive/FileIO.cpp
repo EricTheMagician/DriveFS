@@ -679,20 +679,10 @@ namespace DriveFS{
                    [io = this]() -> void {
 
                        if (io->checkFileExists()) {
-                           sleep(3);
+                           sleep(60);
                            // file can have no parents happen when launching DriveFS
                            // so wait until it is filled. if it's deleted
                            auto file = io->m_file;
-#warning bsoncxx
-//                           while(io->m_file->parents.empty() && !io->m_file->getIsTrashed() && !io->m_file->getIsUploaded()){
-//                               if(file->getIsTrashed()){
-//                                   LOG(INFO) << "fiile with id " << file->getId() << "is trashed";
-//                                   return;
-//                               }
-//                               LOG(INFO) << "while uploading: waiting for " << file->getId() << "to have parents";
-//                               sleep(1);
-//                           }
-
 
                            if(file->getIsTrashed()){
                                io->checkFileExists();

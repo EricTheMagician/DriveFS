@@ -2,7 +2,7 @@
 
 #include <cstdint>
 #include <atomic>
-    #include <boost/intrusive_ptr.hpp>
+#include <boost/intrusive_ptr.hpp>
 
 class shared_obj{
 public:
@@ -12,6 +12,11 @@ public:
         intrusive_ptr_release(this);
     }
     virtual ~shared_obj() = default;
+
+    inline uint_fast8_t getReferenceCount() const noexcept {
+        return referenceCount_.load(std::memory_order_acquire);
+    }
+
 private:
     std::atomic_uint_fast8_t referenceCount_;
     friend void intrusive_ptr_add_ref(shared_obj * obj){
