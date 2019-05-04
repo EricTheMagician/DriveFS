@@ -838,6 +838,7 @@ namespace DriveFS{
         LOG(INFO) << "Creating file with name " << name << " and parent Id " << parent->getId();
 
         child = account->createNewChild(parent, name, mode, true);
+        FileManager::resetChildrenBuffer(parent->getId());
         FileIO::shared_ptr io {new FileIO(child, fi->flags)};
         fi->fh = (uintptr_t) io.get();
         struct fuse_entry_param e;
