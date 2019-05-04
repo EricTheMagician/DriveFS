@@ -28,7 +28,11 @@ namespace DriveFS{
             }
             return;
         }
-        GDriveObject child =FileManager::fromParentIdAndName(parent->getId(), name);
+
+        // it is legitimate to ask the filesystem whether a file exists or not.
+        // we should not log if it cannot find a file.
+        GDriveObject child =FileManager::fromParentIdAndName(parent->getId(), name, false);
+
         if(child){
             struct fuse_entry_param e;
             memset(&e, 0, sizeof(e));
