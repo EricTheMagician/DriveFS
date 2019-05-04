@@ -320,7 +320,7 @@ namespace DriveFS{
 
 #endif
             }
-            LOG(INFO) << "Renaming: Mving file ("<< name<<") from " << parent->getName() << " to " << newParent->getName();
+            LOG(INFO) << "Renaming: Moving file ("<< name<<") from " << parent->getName() << " to " << newParent->getName();
         }
 
         if(child->getName() != newname) {
