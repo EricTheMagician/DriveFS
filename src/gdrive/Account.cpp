@@ -1331,8 +1331,6 @@ where c.column_b = t.column_b;
             doc["name"] = web::json::value::string(name);
             doc["parents"][0] = web::json::value::string(parent->getId());
 
-            LOG(INFO) << doc.serialize();
-
             web::json::value status = createFolderOnGDrive(doc.serialize());
 
             if (!status.is_null()) {
@@ -1500,9 +1498,7 @@ where c.column_b = t.column_b;
         if (file) {
             db_handle_t db;
             auto w = db.getWork();
-//            auto count = data.count(document{} << "id" << file->getId() << finalize);
             bool updateParents = !parentIds.empty();
-            file->lock();
 
             std::string sql;
             sql.reserve(512);
@@ -1528,13 +1524,13 @@ where c.column_b = t.column_b;
                     ",size=EXCLUDED.size";
 
             try{
+                file->getScopeLock();
                 w->exec(sql);
                 w->commit();
             }catch(std::exception &e){
                 w->abort();
                 LOG(ERROR) << e.what();
             }
-            file->unlock();
         }
 
     }

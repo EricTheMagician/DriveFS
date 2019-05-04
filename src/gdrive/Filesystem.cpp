@@ -352,8 +352,7 @@ namespace DriveFS{
             }
             account->upsertFileToDatabase(child, {FileManager::fromInode(newparent_ino)->getId()});
         }else{
-//            FileIO
-            account->upsertFileToDatabase(child, {FileManager::fromInode(newparent_ino)->getId()});
+            account->upsertFileoDatabase(child, {FileManager::fromInode(newparent_ino)->getId()});
         }
 
 //#if FUSE_USE_VERSION >= 30
