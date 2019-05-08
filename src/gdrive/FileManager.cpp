@@ -9,8 +9,8 @@
 #include <boost/container/flat_map.hpp>
 
 namespace DriveFS::FileManager{
-    boost::compute::detail::lru_cache<ino_t, GDriveObject> inodeToObject(40960);
-    boost::compute::detail::lru_cache<std::string, GDriveObject> idToObject(40960);
+    boost::compute::detail::lru_cache<ino_t, GDriveObject> inodeToObject(80960);
+    boost::compute::detail::lru_cache<std::string, GDriveObject> idToObject(80960);
     void cleanUpOnExit(){
         DriveFS::FileManager::inodeToObject.clear();
         DriveFS::FileManager::idToObject.clear();
@@ -101,8 +101,10 @@ namespace DriveFS::FileManager{
             auto maybe_object = inodeToObject.get(inode);
             if(maybe_object){
                 auto child = *maybe_object;
-                children.push_back(child);
-                childMap[child->getName()] = child;
+                if(child){
+                    children.push_back(child);
+                    childMap[child->getName()] = child;
+                }
                 continue;
             }
 
