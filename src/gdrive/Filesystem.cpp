@@ -537,45 +537,45 @@ namespace DriveFS{
     }
 
     void release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi){
-            FileIO* io =  (FileIO *) fi->fh;
+        FileIO* io =  (FileIO *) fi->fh;
 
-            if(io == nullptr){
-                int reply_err = fuse_reply_err(req, EIO);
-                while(reply_err != 0){
-                    LOG(ERROR) << "Threre was an error replying";
-                    reply_err = fuse_reply_err(req, EIO);
-                }
-                return;
-            }
-
-            do{
-                usleep(15000);
-            }while(io->getReferenceCount() > 1);
-
-
-            fi->fh = 0;
-            Account *account = getAccount(req);
-
-            int reply_err = fuse_reply_err(req, 0);
+        if(io == nullptr){
+            int reply_err = fuse_reply_err(req, EIO);
             while(reply_err != 0){
                 LOG(ERROR) << "Threre was an error replying";
-                reply_err = fuse_reply_err(req, 0);
+                reply_err = fuse_reply_err(req, EIO);
             }
-            io->release();
+            return;
+        }
 
-            if(io->b_needs_uploading){
-                std::vector<std::string> pids{};
-                auto file = FileManager::fromInode(ino);
-                account->upsertFileToDatabase(file, pids);
-                LOG(INFO) << "Releasing file that needs upload: " << file->getName();
-                fi->fh = 0;
-                if(file) {
-                    io->upload(true);
-                }
-            }else{
-                io->deleteObject();
-                fi->fh = 0;
+        do{
+            usleep(15000);
+        }while(io->getReferenceCount() > 1);
+
+
+        fi->fh = 0;
+        Account *account = getAccount(req);
+
+        int reply_err = fuse_reply_err(req, 0);
+        while(reply_err != 0){
+            LOG(ERROR) << "Threre was an error replying";
+            reply_err = fuse_reply_err(req, 0);
+        }
+        io->release();
+
+        if(io->b_needs_uploading){
+            std::vector<std::string> pids{};
+            auto file = FileManager::fromInode(ino);
+            account->upsertFileToDatabase(file, pids);
+            LOG(INFO) << "Releasing file that needs upload: " << file->getName();
+            fi->fh = 0;
+            if(file) {
+                io->upload(true);
             }
+        }else{
+            io->deleteObject();
+            fi->fh = 0;
+        }
 
     }
 
@@ -962,3 +962,4 @@ namespace DriveFS{
     }
 
 }
+
