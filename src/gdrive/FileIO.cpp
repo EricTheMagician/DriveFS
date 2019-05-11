@@ -575,7 +575,7 @@ namespace DriveFS{
                                                }
                                            });
                     } else {
-                        bool isRequired = start >= off && start < off + _size;
+                        bool isRequired = start >= off && start < off + size;
                         boost::asio::post(*DownloadPool,
                            [req = isRequired ? req : nullptr, cacheName2, start, chunkSize, path, weak_file = std::weak_ptr<_Object>(localFile), weak_obj = std::weak_ptr<__no_collision_download__>(cache)]() -> void {
                                auto strong_obj = weak_obj.lock();
