@@ -242,8 +242,18 @@ namespace DriveFS{
             if(resp.status_code() == 404){
                 LOG(ERROR) << "Giving up for id " << file->getId();
 #warning todo remove from database
-                if(!fuseReq){
+                if(fuseReq != nullptr){
                     fuse_reply_err(fuseReq, ENOENT);
+                }
+                DownloadCache.remove(cacheName);
+                cache->buffer = new std::vector<uint8_t>(0);
+                cache->event.signal();
+                return false;
+            } else if (resp.status_code() == 416){
+                LOG(ERROR) << "Range unacceptable for " << file->getId();
+                LOG(ERROR) << "Requested range is: (" << start << ", " << end << ")";
+                if(fuseReq != nullptr){
+                    fuse_reply_err(fuseReq, EIO);
                 }
                 DownloadCache.remove(cacheName);
                 cache->buffer = new std::vector<uint8_t>(0);
@@ -329,7 +339,9 @@ namespace DriveFS{
             return true;
         }
 
-        fuse_reply_err(fuseReq, EIO);
+        if(fuseReq != nullptr){
+            fuse_reply_err(fuseReq, EIO);
+        }
         cache->buffer = new std::vector<uint8_t>(0);
         cache->event.signal();
         return false;
